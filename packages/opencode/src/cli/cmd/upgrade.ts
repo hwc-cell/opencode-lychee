@@ -3,19 +3,20 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { d } from "../i18n"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
-  describe: "upgrade opencode to the latest or a specific version",
+  describe: d("upgrade opencode to the latest or a specific version"),
   builder: (yargs: Argv) => {
     return yargs
       .positional("target", {
-        describe: "version to upgrade to, for ex '0.1.48' or 'v0.1.48'",
+        describe: d("version to upgrade to, for ex '0.1.48' or 'v0.1.48'"),
         type: "string",
       })
       .option("method", {
         alias: "m",
-        describe: "installation method to use",
+        describe: d("installation method to use"),
         type: "string",
         choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
       })

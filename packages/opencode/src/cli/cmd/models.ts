@@ -4,23 +4,24 @@ import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { d } from "../i18n"
 
 export const ModelsCommand = effectCmd({
   command: "models [provider]",
-  describe: "list all available models",
+  describe: d("list all available models"),
   builder: (yargs) =>
     yargs
       .positional("provider", {
-        describe: "provider ID to filter models by",
+        describe: d("provider ID to filter models by"),
         type: "string",
         array: false,
       })
       .option("verbose", {
-        describe: "use more verbose model output (includes metadata like costs)",
+        describe: d("use more verbose model output (includes metadata like costs)"),
         type: "boolean",
       })
       .option("refresh", {
-        describe: "refresh the models cache from models.dev",
+        describe: d("refresh the models cache from models.dev"),
         type: "boolean",
       }),
   handler: Effect.fn("Cli.models")(function* (args) {

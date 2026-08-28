@@ -6,6 +6,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Project } from "@/project/project"
 import { InstanceRef } from "@/effect/instance-ref"
+import { d } from "../i18n"
 
 interface SessionStats {
   totalSessions: number
@@ -48,22 +49,22 @@ interface SessionStats {
 
 export const StatsCommand = effectCmd({
   command: "stats",
-  describe: "show token usage and cost statistics",
+  describe: d("show token usage and cost statistics"),
   builder: (yargs) =>
     yargs
       .option("days", {
-        describe: "show stats for the last N days (default: all time)",
+        describe: d("show stats for the last N days (default: all time)"),
         type: "number",
       })
       .option("tools", {
-        describe: "number of tools to show (default: all)",
+        describe: d("number of tools to show (default: all)"),
         type: "number",
       })
       .option("models", {
-        describe: "show model statistics (default: hidden). Pass a number to show top N, otherwise shows all",
+        describe: d("show model statistics (default: hidden). Pass a number to show top N, otherwise shows all"),
       })
       .option("project", {
-        describe: "filter by project (default: all projects, empty string: current project)",
+        describe: d("filter by project (default: all projects, empty string: current project)"),
         type: "string",
       }),
   handler: Effect.fn("Cli.stats")(function* (args) {

@@ -154,6 +154,11 @@ export const dict: Dict = {
   "alert.confirm.desc": "确认对话框",
   "alert.ok": "确定",
 
+  // Help dialog
+  "help.title": "帮助",
+  "help.close.desc": "关闭帮助",
+  "help.press": "按 {shortcut} 可在任意上下文中查看所有可用的操作与命令。",
+
   // Session status
   "session.unshareFailed": "取消分享会话失败",
   "session.copyFailed": "复制到剪贴板失败",

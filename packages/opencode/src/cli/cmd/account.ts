@@ -6,6 +6,7 @@ import { AccountID, OrgID, PollExpired, type PollResult, type AccountError } fro
 import { effectCmd } from "../effect-cmd"
 import * as Prompt from "../effect/prompt"
 import open from "open"
+import { d } from "../i18n"
 
 const openBrowser = (url: string) => Effect.promise(() => open(url).catch(() => undefined))
 
@@ -180,7 +181,7 @@ export const LoginCommand = effectCmd({
   instance: false,
   builder: (yargs) =>
     yargs.positional("url", {
-      describe: "server URL",
+      describe: d("server URL"),
       type: "string",
     }),
   handler: Effect.fn("Cli.account.login")(function* (args) {
@@ -195,7 +196,7 @@ export const LogoutCommand = effectCmd({
   instance: false,
   builder: (yargs) =>
     yargs.positional("email", {
-      describe: "account email to log out from",
+      describe: d("account email to log out from"),
       type: "string",
     }),
   handler: Effect.fn("Cli.account.logout")(function* (args) {
@@ -241,23 +242,23 @@ export const ConsoleCommand = cmd({
     yargs
       .command({
         ...LoginCommand,
-        describe: "log in to console",
+        describe: d("log in to console"),
       })
       .command({
         ...LogoutCommand,
-        describe: "log out from console",
+        describe: d("log out from console"),
       })
       .command({
         ...SwitchCommand,
-        describe: "switch active org",
+        describe: d("switch active org"),
       })
       .command({
         ...OrgsCommand,
-        describe: "list orgs",
+        describe: d("list orgs"),
       })
       .command({
         ...OpenCommand,
-        describe: "open active console account",
+        describe: d("open active console account"),
       })
       .demandCommand(),
   async handler() {},

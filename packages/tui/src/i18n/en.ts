@@ -154,6 +154,11 @@ export const dict: Dict = {
   "alert.confirm.desc": "Confirm alert",
   "alert.ok": "ok",
 
+  // Help dialog
+  "help.title": "Help",
+  "help.close.desc": "Close help",
+  "help.press": "Press {shortcut} to see all available actions and commands in any context.",
+
   // Session status
   "session.unshareFailed": "Failed to unshare session",
   "session.copyFailed": "Failed to copy to clipboard",

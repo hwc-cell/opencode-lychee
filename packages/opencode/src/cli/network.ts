@@ -2,32 +2,33 @@ import type { Argv, InferredOptionTypes } from "yargs"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import type { Config } from "@/config/config"
 import { Effect } from "effect"
+import { d } from "./i18n"
 
 const options = {
   port: {
     type: "number" as const,
-    describe: "port to listen on",
+    describe: d("port to listen on"),
     default: 0,
   },
   hostname: {
     type: "string" as const,
-    describe: "hostname to listen on",
+    describe: d("hostname to listen on"),
     default: "127.0.0.1",
   },
   mdns: {
     type: "boolean" as const,
-    describe: "enable mDNS service discovery (defaults hostname to 0.0.0.0)",
+    describe: d("enable mDNS service discovery (defaults hostname to 0.0.0.0)"),
     default: false,
   },
   "mdns-domain": {
     type: "string" as const,
-    describe: "custom domain name for mDNS service (default: opencode.local)",
+    describe: d("custom domain name for mDNS service (default: opencode.local)"),
     default: "opencode.local",
   },
   cors: {
     type: "string" as const,
     array: true,
-    describe: "additional domains to allow for CORS",
+    describe: d("additional domains to allow for CORS"),
     default: [] as string[],
   },
 }

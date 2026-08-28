@@ -1,9 +1,10 @@
 import { Effect } from "effect"
 import { effectCmd } from "../../effect-cmd"
+import { d } from "../../i18n"
 
 export const AgentCommand = effectCmd({
   command: "agent <name>",
-  describe: "show agent configuration details",
+  describe: d("show agent configuration details"),
   builder: (yargs) =>
     yargs
       .positional("name", {

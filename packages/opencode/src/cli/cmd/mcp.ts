@@ -20,6 +20,7 @@ import { Global } from "@opencode-ai/core/global"
 import { modify, applyEdits } from "jsonc-parser"
 import { Filesystem } from "@/util/filesystem"
 import { Effect } from "effect"
+import { d } from "../i18n"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -94,7 +95,7 @@ function authState() {
 
 export const McpCommand = cmd({
   command: "mcp",
-  describe: "manage MCP (Model Context Protocol) servers",
+  describe: d("manage MCP (Model Context Protocol) servers"),
   builder: (yargs) =>
     yargs
       .command(McpAddCommand)
@@ -109,7 +110,7 @@ export const McpCommand = cmd({
 export const McpListCommand = effectCmd({
   command: "list",
   aliases: ["ls"],
-  describe: "list MCP servers and their status",
+  describe: d("list MCP servers and their status"),
   handler: Effect.fn("Cli.mcp.list")(function* () {
     UI.empty()
     prompts.intro("MCP Servers")
@@ -169,11 +170,11 @@ export const McpListCommand = effectCmd({
 
 export const McpAuthCommand = effectCmd({
   command: "auth [name]",
-  describe: "authenticate with an OAuth-enabled MCP server",
+  describe: d("authenticate with an OAuth-enabled MCP server"),
   builder: (yargs) =>
     yargs
       .positional("name", {
-        describe: "name of the MCP server",
+        describe: d("name of the MCP server"),
         type: "string",
       })
       .command(McpAuthListCommand),
@@ -306,7 +307,7 @@ export const McpAuthCommand = effectCmd({
 export const McpAuthListCommand = effectCmd({
   command: "list",
   aliases: ["ls"],
-  describe: "list OAuth-capable MCP servers and their auth status",
+  describe: d("list OAuth-capable MCP servers and their auth status"),
   handler: Effect.fn("Cli.mcp.auth.list")(function* () {
     UI.empty()
     prompts.intro("MCP OAuth Status")
@@ -335,10 +336,10 @@ export const McpAuthListCommand = effectCmd({
 
 export const McpLogoutCommand = effectCmd({
   command: "logout [name]",
-  describe: "remove OAuth credentials for an MCP server",
+  describe: d("remove OAuth credentials for an MCP server"),
   builder: (yargs) =>
     yargs.positional("name", {
-      describe: "name of the MCP server",
+      describe: d("name of the MCP server"),
       type: "string",
     }),
   handler: Effect.fn("Cli.mcp.logout")(function* (args) {
@@ -428,24 +429,24 @@ async function addMcpToConfig(name: string, mcpConfig: ConfigMCPV1.Info, configP
 
 export const McpAddCommand = effectCmd({
   command: "add [name]",
-  describe: "add an MCP server",
+  describe: d("add an MCP server"),
   builder: (yargs) =>
     yargs
       .positional("name", {
-        describe: "name of the MCP server",
+        describe: d("name of the MCP server"),
         type: "string",
       })
       .option("url", {
-        describe: "URL for a remote MCP server",
+        describe: d("URL for a remote MCP server"),
         type: "string",
       })
       .option("env", {
-        describe: "environment variable for a local MCP server (KEY=VALUE)",
+        describe: d("environment variable for a local MCP server (KEY=VALUE)"),
         type: "string",
         array: true,
       })
       .option("header", {
-        describe: "HTTP header for a remote MCP server (KEY=VALUE)",
+        describe: d("HTTP header for a remote MCP server (KEY=VALUE)"),
         type: "string",
         array: true,
       }),
@@ -658,10 +659,10 @@ export const McpAddCommand = effectCmd({
 
 export const McpDebugCommand = effectCmd({
   command: "debug <name>",
-  describe: "debug OAuth connection for an MCP server",
+  describe: d("debug OAuth connection for an MCP server"),
   builder: (yargs) =>
     yargs.positional("name", {
-      describe: "name of the MCP server",
+      describe: d("name of the MCP server"),
       type: "string",
       demandOption: true,
     }),

@@ -2,17 +2,18 @@ import { Effect } from "effect"
 import { Snapshot } from "../../../snapshot"
 import { effectCmd } from "../../effect-cmd"
 import { cmd } from "../cmd"
+import { d } from "../../i18n"
 
 export const SnapshotCommand = cmd({
   command: "snapshot",
-  describe: "snapshot debugging utilities",
+  describe: d("snapshot debugging utilities"),
   builder: (yargs) => yargs.command(TrackCommand).command(PatchCommand).command(DiffCommand).demandCommand(),
   async handler() {},
 })
 
 const TrackCommand = effectCmd({
   command: "track",
-  describe: "track current snapshot state",
+  describe: d("track current snapshot state"),
   handler: Effect.fn("Cli.debug.snapshot.track")(function* () {
     const out = yield* Snapshot.Service.use((svc) => svc.track())
     console.log(out)
@@ -21,7 +22,7 @@ const TrackCommand = effectCmd({
 
 const PatchCommand = effectCmd({
   command: "patch <hash>",
-  describe: "show patch for a snapshot hash",
+  describe: d("show patch for a snapshot hash"),
   builder: (yargs) =>
     yargs.positional("hash", {
       type: "string",
@@ -36,7 +37,7 @@ const PatchCommand = effectCmd({
 
 const DiffCommand = effectCmd({
   command: "diff <hash>",
-  describe: "show diff for a snapshot hash",
+  describe: d("show diff for a snapshot hash"),
   builder: (yargs) =>
     yargs.positional("hash", {
       type: "string",

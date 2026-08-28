@@ -4,14 +4,15 @@ import { effectCmd, fail } from "../effect-cmd"
 import { Git } from "@/git"
 import { InstanceRef } from "@/effect/instance-ref"
 import { Process } from "@/util/process"
+import { d } from "../i18n"
 
 export const PrCommand = effectCmd({
   command: "pr <number>",
-  describe: "fetch and checkout a GitHub PR branch, then run opencode",
+  describe: d("fetch and checkout a GitHub PR branch, then run opencode"),
   builder: (yargs) =>
     yargs.positional("number", {
       type: "number",
-      describe: "PR number to checkout",
+      describe: d("PR number to checkout"),
       demandOption: true,
     }),
   handler: Effect.fn("Cli.pr")(function* (args) {

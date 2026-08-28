@@ -6,6 +6,7 @@ import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { effectCmd } from "../../effect-cmd"
 import { cmd } from "../cmd"
+import { d } from "../../i18n"
 
 const filesystem = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
@@ -15,7 +16,7 @@ const filesystem = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const FileSearchCommand = effectCmd({
   command: "search <query>",
-  describe: "search files by query",
+  describe: d("search files by query"),
   builder: (yargs) =>
     yargs.positional("query", {
       type: "string",
@@ -30,7 +31,7 @@ const FileSearchCommand = effectCmd({
 
 const FileReadCommand = effectCmd({
   command: "read <path>",
-  describe: "read file contents as JSON",
+  describe: d("read file contents as JSON"),
   builder: (yargs) =>
     yargs.positional("path", {
       type: "string",
@@ -51,7 +52,7 @@ const FileReadCommand = effectCmd({
 
 const FileListCommand = effectCmd({
   command: "list <path>",
-  describe: "list files in a directory",
+  describe: d("list files in a directory"),
   builder: (yargs) =>
     yargs.positional("path", {
       type: "string",
@@ -66,7 +67,7 @@ const FileListCommand = effectCmd({
 
 export const FileCommand = cmd({
   command: "file",
-  describe: "file system debugging utilities",
+  describe: d("file system debugging utilities"),
   builder: (yargs) =>
     yargs.command(FileReadCommand).command(FileListCommand).command(FileSearchCommand).demandCommand(),
   async handler() {},

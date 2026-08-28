@@ -29,6 +29,7 @@ import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
+import { d } from "./cli/i18n"
 
 const args = hideBin(process.argv)
 
@@ -46,21 +47,21 @@ const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
   .scriptName("opencode")
   .wrap(100)
-  .help("help", "show help")
+  .help("help", d("show help"))
   .alias("help", "h")
-  .version("version", "show version number", InstallationVersion)
+  .version("version", d("show version number"), InstallationVersion)
   .alias("version", "v")
   .option("print-logs", {
-    describe: "print logs to stderr",
+    describe: d("print logs to stderr"),
     type: "boolean",
   })
   .option("log-level", {
-    describe: "log level",
+    describe: d("log level"),
     type: "string",
     choices: ["DEBUG", "INFO", "WARN", "ERROR"],
   })
   .option("pure", {
-    describe: "run without external plugins",
+    describe: d("run without external plugins"),
     type: "boolean",
   })
   .middleware(async (opts) => {
@@ -77,7 +78,7 @@ const cli = yargs(args)
     process.env.OPENCODE_PID = String(process.pid)
   })
   .usage("")
-  .completion("completion", "generate shell completion script")
+  .completion("completion", d("generate shell completion script"))
   .command(AcpCommand)
   .command(McpCommand)
   .command(TuiThreadCommand)

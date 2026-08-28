@@ -13,6 +13,7 @@ import { NotFoundError } from "@/storage/storage"
 import { EOL } from "os"
 import path from "path"
 import { which } from "@opencode-ai/core/util/which"
+import { d } from "../i18n"
 
 function pagerCmd(): string[] {
   const lessOptions = ["-R", "-S"]
@@ -43,17 +44,17 @@ function pagerCmd(): string[] {
 
 export const SessionCommand = cmd({
   command: "session",
-  describe: "manage sessions",
+  describe: d("manage sessions"),
   builder: (yargs: Argv) => yargs.command(SessionListCommand).command(SessionDeleteCommand).demandCommand(),
   async handler() {},
 })
 
 export const SessionDeleteCommand = effectCmd({
   command: "delete <sessionID>",
-  describe: "delete a session",
+  describe: d("delete a session"),
   builder: (yargs) =>
     yargs.positional("sessionID", {
-      describe: "session ID to delete",
+      describe: d("session ID to delete"),
       type: "string",
       demandOption: true,
     }),
@@ -69,16 +70,16 @@ export const SessionDeleteCommand = effectCmd({
 
 export const SessionListCommand = effectCmd({
   command: "list",
-  describe: "list sessions",
+  describe: d("list sessions"),
   builder: (yargs) =>
     yargs
       .option("max-count", {
         alias: "n",
-        describe: "limit to N most recent sessions",
+        describe: d("limit to N most recent sessions"),
         type: "number",
       })
       .option("format", {
-        describe: "output format",
+        describe: d("output format"),
         type: "string",
         choices: ["table", "json"],
         default: "table",

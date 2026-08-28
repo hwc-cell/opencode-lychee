@@ -14,6 +14,7 @@ import { writeHeapSnapshot } from "v8"
 import { ServerAuth } from "@/server/auth"
 import { validateSession } from "../tui/validate-session"
 import { win32InstallCtrlCGuard } from "@opencode-ai/tui/terminal-win32"
+import { d } from "../i18n"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -71,43 +72,43 @@ export function resolveThreadDirectory(project?: string, envPWD = process.env.PW
 
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
-  describe: "start opencode tui",
+  describe: d("start opencode tui"),
   builder: (yargs) =>
     withNetworkOptions(yargs)
       .positional("project", {
         type: "string",
-        describe: "path to start opencode in",
+        describe: d("path to start opencode in"),
       })
       .option("model", {
         type: "string",
         alias: ["m"],
-        describe: "model to use in the format of provider/model",
+        describe: d("model to use in the format of provider/model"),
       })
       .option("continue", {
         alias: ["c"],
-        describe: "continue the last session",
+        describe: d("continue the last session"),
         type: "boolean",
       })
       .option("session", {
         alias: ["s"],
         type: "string",
-        describe: "session id to continue",
+        describe: d("session id to continue"),
       })
       .option("fork", {
         type: "boolean",
-        describe: "fork the session when continuing (use with --continue or --session)",
+        describe: d("fork the session when continuing (use with --continue or --session)"),
       })
       .option("prompt", {
         type: "string",
-        describe: "prompt to use",
+        describe: d("prompt to use"),
       })
       .option("agent", {
         type: "string",
-        describe: "agent to use",
+        describe: d("agent to use"),
       })
       .option("auto", {
         type: "boolean",
-        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+        describe: d("auto-approve permissions that are not explicitly denied (dangerous!)"),
         default: false,
       })
       .option("yolo", {
@@ -122,7 +123,7 @@ export const TuiThreadCommand = cmd({
       })
       .option("mini", {
         type: "boolean",
-        describe: "start the minimal interactive interface",
+        describe: d("start the minimal interactive interface"),
         default: false,
       })
       .option("replay", {
@@ -131,11 +132,11 @@ export const TuiThreadCommand = cmd({
       })
       .option("no-replay", {
         type: "boolean",
-        describe: "disable mini session history replay on resume and after resize",
+        describe: d("disable mini session history replay on resume and after resize"),
       })
       .option("replay-limit", {
         type: "number",
-        describe: "cap visible mini replay to the newest N messages",
+        describe: d("cap visible mini replay to the newest N messages"),
       })
       .option("demo", {
         type: "boolean",
