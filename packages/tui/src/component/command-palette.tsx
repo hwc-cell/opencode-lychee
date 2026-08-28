@@ -1,4 +1,5 @@
 import { createMemo } from "solid-js"
+import { categoryLabel, t } from "../i18n"
 import { DialogSelect, type DialogSelectRef } from "../ui/dialog-select"
 import { type DialogContext } from "../ui/dialog"
 import {
@@ -49,7 +50,7 @@ export function CommandPaletteDialog() {
     entries().map((entry) => ({
       title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
       description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
-      category: typeof entry.command.category === "string" ? entry.command.category : undefined,
+      category: typeof entry.command.category === "string" ? categoryLabel(entry.command.category) : undefined,
       footer: formatKeyBindings(entry.bindings, config),
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
@@ -69,11 +70,11 @@ export function CommandPaletteDialog() {
         .map((option) => ({
           ...option,
           value: `suggested:${option.value}`,
-          category: "Suggested",
+          category: categoryLabel("suggested"),
         })),
       ...options(),
     ]
   }
 
-  return <DialogSelect ref={(value) => (ref = value)} title="Commands" options={list()} />
+  return <DialogSelect ref={(value) => (ref = value)} title={t("palette.title")} options={list()} />
 }

@@ -6,6 +6,7 @@ import { useClipboard } from "../context/clipboard"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { useExit } from "../context/exit"
 import { describeOS, describeTerminal } from "../util/system"
+import { t } from "../i18n"
 
 export function ErrorComponent(props: { error: Error; reset: () => void; mode?: "dark" | "light" }) {
   const term = useTerminalDimensions()
@@ -40,8 +41,8 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
         success: "#7fd88f",
       }
 
-  const message = props.error.message || "An unknown error occurred."
-  const stack = props.error.stack || "No stack trace available."
+  const message = props.error.message || t("error.unknown")
+  const stack = props.error.stack || t("error.noStack")
   const issueURL = buildIssueURL(message, stack)
 
   const copyReport = () => {
@@ -49,9 +50,9 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
   }
 
   const actions = [
-    { key: "c", label: () => (copied() ? "✓ Copied" : "Copy report"), copy: true, onUse: copyReport },
-    { key: "r", label: () => "Restart", onUse: props.reset },
-    { key: "q", label: () => "Quit", onUse: () => exit() },
+    { key: "c", label: () => (copied() ? t("error.copied") : t("error.copyReport")), copy: true, onUse: copyReport },
+    { key: "r", label: () => t("error.restart"), onUse: props.reset },
+    { key: "q", label: () => t("error.quit"), onUse: () => exit() },
   ]
   const [selected, setSelected] = createSignal(0)
   const move = (delta: number) => setSelected((prev) => (prev + delta + actions.length) % actions.length)

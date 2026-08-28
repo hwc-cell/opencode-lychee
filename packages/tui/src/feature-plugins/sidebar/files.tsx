@@ -2,6 +2,7 @@ import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, For, Show, createSignal } from "solid-js"
 import { Locale } from "../../util/locale"
+import { t } from "../../i18n"
 
 const id = "internal:sidebar-files"
 
@@ -24,7 +25,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
             <text fg={theme().text}>{open() ? "▼" : "▶"}</text>
           </Show>
           <text fg={theme().text}>
-            <b>Modified Files</b>
+            <b>{t("sidebar.modifiedFiles")}</b>
           </text>
         </box>
         <Show when={list().length <= 2 || open()}>

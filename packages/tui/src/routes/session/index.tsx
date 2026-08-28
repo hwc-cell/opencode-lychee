@@ -602,7 +602,7 @@ export function Session() {
           .then(() => toast.show({ message: "Session unshared successfully", variant: "success" }))
           .catch((error) => {
             toast.show({
-              message: error instanceof Error ? error.message : "Failed to unshare session",
+              message: error instanceof Error ? error.message : t("session.unshareFailed"),
               variant: "error",
             })
           })
@@ -911,12 +911,12 @@ export function Session() {
         clipboard
           .write?.(text)
           .then(() => toast.show({ message: "Message copied to clipboard!", variant: "success" }))
-          .catch(() => toast.show({ message: "Failed to copy to clipboard", variant: "error" }))
+          .catch(() => toast.show({ message: t("session.copyFailed"), variant: "error" }))
         dialog.clear()
       },
     },
     {
-      title: "Copy session transcript",
+      title: t("session.copyTranscript"),
       value: "session.copy",
       category: "Session",
       slash: {
@@ -940,7 +940,7 @@ export function Session() {
           await clipboard.write?.(transcript)
           toast.show({ message: "Session transcript copied to clipboard!", variant: "success" })
         } catch {
-          toast.show({ message: "Failed to copy session transcript", variant: "error" })
+          toast.show({ message: t("session.copyTranscriptFailed"), variant: "error" })
         }
         dialog.clear()
       },
@@ -1015,7 +1015,7 @@ export function Session() {
             toast.show({ message: `Session exported to ${filename}`, variant: "success" })
           }
         } catch {
-          toast.show({ message: "Failed to export session", variant: "error" })
+          toast.show({ message: t("session.exportFailed"), variant: "error" })
         }
         dialog.clear()
       },
@@ -1673,7 +1673,7 @@ function ReasoningHeader(props: {
     <Switch>
       <Match when={!props.done}>
         <box flexDirection="row">
-          <Spinner color={fg()}>{props.title ? "Thinking: " + props.title : "Thinking"}</Spinner>
+          <Spinner color={fg()}>{props.title ? t("session.thinkingTitle", { title: props.title }) : t("session.thinking")}</Spinner>
         </box>
       </Match>
       <Match when={true}>

@@ -96,6 +96,100 @@ export const dict: Dict = {
   "prompt.createFailed": "Creating a session failed. Open console for more details.",
   "prompt.sendFailed": "Failed to send prompt",
   "prompt.shell": "Shell",
+
+  // Command palette
+  "palette.title": "Commands",
+
+  // Startup & errors
+  "startup.finishing": "Finishing startup...",
+  "startup.loading": "Loading plugins...",
+  "error.unknown": "An unknown error occurred.",
+  "error.noStack": "No stack trace available.",
+  "error.copied": "✓ Copied",
+  "error.copyReport": "Copy report",
+  "error.restart": "Restart",
+  "error.quit": "Quit",
+
+  // Question
+  "question.clearEdit": "Clear answer edit",
+  "question.cancelEdit": "Cancel answer edit",
+  "question.submitEdit": "Submit answer edit",
+  "question.reject": "Reject question",
+  "question.submitAnswer": "Submit answer",
+  "question.confirm": "Confirm",
+
+  // Sidebar
+  "sidebar.context": "Context",
+  "sidebar.modifiedFiles": "Modified Files",
+  "sidebar.todo": "Todo",
+  "sidebar.lspDisabled": "LSPs are disabled",
+  "sidebar.lspActivate": "LSPs will activate as files are read",
+  "sidebar.connected": "Connected",
+  "sidebar.disabled": "Disabled",
+  "sidebar.needsAuth": "Needs auth",
+  "sidebar.needsClientID": "Needs client ID",
+  "sidebar.gettingStarted": "Getting started",
+  "sidebar.freeModels": "OpenCode includes free models so you can start immediately.",
+  "sidebar.moreProviders": "Connect from 75+ providers to use other models, including Claude, GPT, Gemini etc",
+  "sidebar.connectProvider": "Connect provider",
+  "sidebar.tokens": "{tokens} tokens",
+  "sidebar.percentUsed": "{percent}% used",
+  "sidebar.spent": "{cost} spent",
+  "sidebar.active": "active",
+  "sidebar.error": "error",
+  "sidebar.errors": "errors",
+
+  // Subagent footer
+  "subagent.label": "Subagent",
+
+  // Generic select dialog
+  "select.prev": "Previous item",
+  "select.next": "Next item",
+  "select.pageUp": "Page up",
+  "select.pageDown": "Page down",
+  "select.first": "First item",
+  "select.last": "Last item",
+
+  // Alert dialog
+  "alert.confirm.desc": "Confirm alert",
+  "alert.ok": "ok",
+
+  // Session status
+  "session.unshareFailed": "Failed to unshare session",
+  "session.copyFailed": "Failed to copy to clipboard",
+  "session.copyTranscript": "Copy session transcript",
+  "session.copyTranscriptFailed": "Failed to copy session transcript",
+  "session.exportFailed": "Failed to export session",
+  "session.thinking": "Thinking",
+  "session.thinkingTitle": "Thinking: {title}",
+
+  // Command categories
+  "category.suggested": "Suggested",
+  "category.system": "System",
+  "category.session": "Session",
+  "category.prompt": "Prompt",
+  "category.dialog": "Dialog",
+  "category.permission": "Permission",
+  "category.question": "Question",
+  "category.agent": "Agent",
+  "category.workspace": "Workspace",
+  "category.project": "Project",
+  "category.provider": "Provider",
+  "category.server": "Server",
+  "category.theme": "Theme",
+  "category.model": "Model",
+  "category.mcp": "MCP",
+  "category.command": "Command",
+  "category.context": "Context",
+  "category.file": "File",
+  "category.terminal": "Terminal",
+  "category.settings": "Settings",
+  "category.skill": "Skills",
+  "category.git": "Git",
+  "category.language": "Language",
+
+  // Generic select search
+  "select.search": "Search",
 }
 
 export type Placeholders = { normal: string[]; shell: string[] }

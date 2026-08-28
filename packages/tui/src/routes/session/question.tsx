@@ -1,4 +1,5 @@
 import { createStore } from "solid-js/store"
+import { t } from "../../i18n"
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { useRenderer } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
@@ -136,7 +137,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     commands: [
       {
         name: "prompt.clear",
-        title: "Clear answer edit",
+        title: t("question.clearEdit"),
         category: "Question",
         run() {
           const text = textarea?.plainText ?? ""
@@ -151,7 +152,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     bindings: [
       {
         key: "escape",
-        desc: "Cancel answer edit",
+        desc: t("question.cancelEdit"),
         group: "Question",
         cmd: () => {
           setStore("editing", false)
@@ -160,7 +161,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       ...tuiConfig.keybinds.get("prompt.clear"),
       {
         key: "return",
-        desc: "Submit answer edit",
+        desc: t("question.submitEdit"),
         group: "Question",
         cmd: () => {
           const text = textarea?.plainText?.trim() ?? ""
@@ -217,7 +218,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       commands: [
         {
           name: "app.exit",
-          title: "Reject question",
+          title: t("question.reject"),
           category: "Question",
           run() {
             reject()
@@ -249,8 +250,8 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
         },
         ...(confirm()
           ? [
-              { key: "return", desc: "Submit answer", group: "Question", cmd: () => submit() },
-              { key: "escape", desc: "Reject question", group: "Question", cmd: () => reject() },
+              { key: "return", desc: t("question.submitAnswer"), group: "Question", cmd: () => submit() },
+              { key: "escape", desc: t("question.reject"), group: "Question", cmd: () => reject() },
               ...tuiConfig.keybinds.get("app.exit"),
             ]
           : [
@@ -278,7 +279,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
               { key: "down", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
               { key: "j", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
               { key: "return", desc: "Select answer", group: "Question", cmd: () => selectOption() },
-              { key: "escape", desc: "Reject question", group: "Question", cmd: () => reject() },
+              { key: "escape", desc: t("question.reject"), group: "Question", cmd: () => reject() },
               ...tuiConfig.keybinds.get("app.exit"),
             ]),
       ],
@@ -347,7 +348,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
                 selectTab(questions().length)
               }}
             >
-              <text fg={confirm() ? selectedForeground(theme, theme.accent) : theme.textMuted}>Confirm</text>
+              <text fg={confirm() ? selectedForeground(theme, theme.accent) : theme.textMuted}>{t("question.confirm")}</text>
             </box>
           </box>
         </Show>

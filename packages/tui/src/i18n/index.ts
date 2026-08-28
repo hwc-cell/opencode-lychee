@@ -32,6 +32,12 @@ export function t(key: string, params?: Record<string, string | number>): string
   return value
 }
 
+// Command categories are registered as English strings all over the codebase;
+// map them at display time so unknown categories degrade gracefully.
+export function categoryLabel(category: string): string {
+  return dict[`category.${category.toLowerCase()}`] ?? enDict[`category.${category.toLowerCase()}`] ?? category
+}
+
 export const tips: Tip[] = locale === "zh" ? zhTips : enTips
 
 export const inputUndoTip: Tip = locale === "zh" ? zhInputUndoTip : enInputUndoTip

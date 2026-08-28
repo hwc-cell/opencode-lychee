@@ -96,6 +96,100 @@ export const dict: Dict = {
   "prompt.createFailed": "创建会话失败，请打开控制台查看详情。",
   "prompt.sendFailed": "发送提示词失败",
   "prompt.shell": "Shell",
+
+  // Command palette
+  "palette.title": "命令",
+
+  // Startup & errors
+  "startup.finishing": "正在完成启动...",
+  "startup.loading": "正在加载插件...",
+  "error.unknown": "发生了未知错误。",
+  "error.noStack": "没有可用的堆栈信息。",
+  "error.copied": "✓ 已复制",
+  "error.copyReport": "复制报告",
+  "error.restart": "重启",
+  "error.quit": "退出",
+
+  // Question
+  "question.clearEdit": "清空答案编辑",
+  "question.cancelEdit": "取消答案编辑",
+  "question.submitEdit": "提交答案编辑",
+  "question.reject": "拒绝问题",
+  "question.submitAnswer": "提交答案",
+  "question.confirm": "确认",
+
+  // Sidebar
+  "sidebar.context": "上下文",
+  "sidebar.modifiedFiles": "已修改文件",
+  "sidebar.todo": "待办",
+  "sidebar.lspDisabled": "LSP 已禁用",
+  "sidebar.lspActivate": "LSP 将在文件被读取时激活",
+  "sidebar.connected": "已连接",
+  "sidebar.disabled": "已禁用",
+  "sidebar.needsAuth": "需要授权",
+  "sidebar.needsClientID": "需要客户端 ID",
+  "sidebar.gettingStarted": "快速开始",
+  "sidebar.freeModels": "OpenCode 内置免费模型，你可以立即开始使用。",
+  "sidebar.moreProviders": "连接 75+ 个供应商可使用其他模型，包括 Claude、GPT、Gemini 等",
+  "sidebar.connectProvider": "连接供应商",
+  "sidebar.tokens": "{tokens} tokens",
+  "sidebar.percentUsed": "{percent}% 已使用",
+  "sidebar.spent": "已花费 {cost}",
+  "sidebar.active": "个活跃",
+  "sidebar.error": "个错误",
+  "sidebar.errors": "个错误",
+
+  // Subagent footer
+  "subagent.label": "子代理",
+
+  // Generic select dialog
+  "select.prev": "上一个",
+  "select.next": "下一个",
+  "select.pageUp": "向上翻页",
+  "select.pageDown": "向下翻页",
+  "select.first": "第一项",
+  "select.last": "最后一项",
+
+  // Alert dialog
+  "alert.confirm.desc": "确认对话框",
+  "alert.ok": "确定",
+
+  // Session status
+  "session.unshareFailed": "取消分享会话失败",
+  "session.copyFailed": "复制到剪贴板失败",
+  "session.copyTranscript": "复制会话记录",
+  "session.copyTranscriptFailed": "复制会话记录失败",
+  "session.exportFailed": "导出会话失败",
+  "session.thinking": "思考中",
+  "session.thinkingTitle": "思考中：{title}",
+
+  // Command categories
+  "category.suggested": "推荐",
+  "category.system": "系统",
+  "category.session": "会话",
+  "category.prompt": "提示词",
+  "category.dialog": "对话框",
+  "category.permission": "权限",
+  "category.question": "问题",
+  "category.agent": "代理",
+  "category.workspace": "工作区",
+  "category.project": "项目",
+  "category.provider": "供应商",
+  "category.server": "服务器",
+  "category.theme": "主题",
+  "category.model": "模型",
+  "category.mcp": "MCP",
+  "category.command": "命令",
+  "category.context": "上下文",
+  "category.file": "文件",
+  "category.terminal": "终端",
+  "category.settings": "设置",
+  "category.skill": "技能",
+  "category.git": "Git",
+  "category.language": "语言",
+
+  // Generic select search
+  "select.search": "搜索",
 }
 
 export type Placeholders = { normal: string[]; shell: string[] }

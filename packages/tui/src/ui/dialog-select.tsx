@@ -19,6 +19,7 @@ import { Locale } from "../util/locale"
 import { getScrollAcceleration } from "../util/scroll"
 import { useTuiConfig } from "../config"
 import { formatKeyBindings, useBindings, useKeymapSelector } from "../keymap"
+import { t } from "../i18n"
 
 export interface DialogSelectProps<T> {
   title: string
@@ -373,7 +374,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       commands: [
         {
           name: "dialog.select.prev",
-          title: "Previous item",
+          title: t("select.prev"),
           category: "Dialog",
           run() {
             setStore("input", "keyboard")
@@ -382,7 +383,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         },
         {
           name: "dialog.select.next",
-          title: "Next item",
+          title: t("select.next"),
           category: "Dialog",
           run() {
             setStore("input", "keyboard")
@@ -391,7 +392,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         },
         {
           name: "dialog.select.page_up",
-          title: "Page up",
+          title: t("select.pageUp"),
           category: "Dialog",
           run() {
             setStore("input", "keyboard")
@@ -400,7 +401,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         },
         {
           name: "dialog.select.page_down",
-          title: "Page down",
+          title: t("select.pageDown"),
           category: "Dialog",
           run() {
             setStore("input", "keyboard")
@@ -409,7 +410,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         },
         {
           name: "dialog.select.home",
-          title: "First item",
+          title: t("select.first"),
           category: "Dialog",
           run() {
             if (props.locked) return
@@ -419,7 +420,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         },
         {
           name: "dialog.select.end",
-          title: "Last item",
+          title: t("select.last"),
           category: "Dialog",
           run() {
             if (props.locked) return
@@ -590,7 +591,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                   input.focus()
                 }, 1)
               }}
-              placeholder={props.placeholder ?? "Search"}
+              placeholder={props.placeholder ?? t("select.search")}
               placeholderColor={theme.textMuted}
             />
           </box>

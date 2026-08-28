@@ -5,6 +5,7 @@ import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
+import { t } from "../../i18n"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 
@@ -16,9 +17,9 @@ export function SubagentFooter() {
 
   const subagentInfo = createMemo(() => {
     const s = session()
-    if (!s) return { label: "Subagent", index: 0, total: 0 }
+    if (!s) return { label: t("subagent.label"), index: 0, total: 0 }
     const agentMatch = s.title.match(/@(\w+) subagent/)
-    const label = agentMatch ? Locale.titlecase(agentMatch[1]) : "Subagent"
+    const label = agentMatch ? Locale.titlecase(agentMatch[1]) : t("subagent.label")
 
     if (!s.parentID) return { label, index: 0, total: 0 }
 

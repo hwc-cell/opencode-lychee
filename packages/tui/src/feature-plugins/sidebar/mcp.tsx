@@ -1,6 +1,7 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, For, Match, Show, Switch, createSignal } from "solid-js"
+import { t } from "../../i18n"
 
 const id = "internal:sidebar-mcp"
 
@@ -38,7 +39,8 @@ function View(props: { api: TuiPluginApi }) {
             <Show when={!open()}>
               <span style={{ fg: theme().textMuted }}>
                 {" "}
-                ({on()} active{bad() > 0 ? `, ${bad()} error${bad() > 1 ? "s" : ""}` : ""})
+                ({on()} {t("sidebar.active")}
+                {bad() > 0 ? `, ${bad()} ${t(bad() > 1 ? "sidebar.errors" : "sidebar.error")}` : ""})
               </span>
             </Show>
           </text>
@@ -59,13 +61,13 @@ function View(props: { api: TuiPluginApi }) {
                   {item.name}{" "}
                   <span style={{ fg: theme().textMuted }}>
                     <Switch fallback={item.status}>
-                      <Match when={item.status === "connected"}>Connected</Match>
+                      <Match when={item.status === "connected"}>{t("sidebar.connected")}</Match>
                       <Match when={item.status === "failed"}>
                         <i>{item.error}</i>
                       </Match>
-                      <Match when={item.status === "disabled"}>Disabled</Match>
-                      <Match when={item.status === "needs_auth"}>Needs auth</Match>
-                      <Match when={item.status === "needs_client_registration"}>Needs client ID</Match>
+                      <Match when={item.status === "disabled"}>{t("sidebar.disabled")}</Match>
+                      <Match when={item.status === "needs_auth"}>{t("sidebar.needsAuth")}</Match>
+                      <Match when={item.status === "needs_client_registration"}>{t("sidebar.needsClientID")}</Match>
                     </Switch>
                   </span>
                 </text>

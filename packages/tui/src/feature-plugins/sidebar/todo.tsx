@@ -2,6 +2,7 @@ import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, For, Show, createSignal } from "solid-js"
 import { TodoItem } from "../../component/todo-item"
+import { t } from "../../i18n"
 
 const id = "internal:sidebar-todo"
 
@@ -19,7 +20,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
             <text fg={theme().text}>{open() ? "▼" : "▶"}</text>
           </Show>
           <text fg={theme().text}>
-            <b>Todo</b>
+            <b>{t("sidebar.todo")}</b>
           </text>
         </box>
         <Show when={list().length <= 2 || open()}>
