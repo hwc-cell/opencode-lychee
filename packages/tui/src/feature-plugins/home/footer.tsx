@@ -4,6 +4,7 @@ import { createMemo, Match, Show, Switch } from "solid-js"
 import { abbreviateHome } from "../../runtime"
 import { useTuiPaths } from "../../context/runtime"
 import { useHomeSessionDestination } from "../../routes/home/session-destination"
+import { t } from "../../i18n"
 
 const id = "internal:home-footer"
 
@@ -43,7 +44,7 @@ function Mcp(props: { api: TuiPluginApi }) {
               <span style={{ fg: count() > 0 ? theme().success : theme().textMuted }}>⊙ </span>
             </Match>
           </Switch>
-          {count()} MCP
+          {t("home.footer.mcp", { count: count() })}
         </text>
         <text fg={theme().textMuted}>/status</text>
       </box>

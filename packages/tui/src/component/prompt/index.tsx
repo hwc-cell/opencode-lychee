@@ -39,6 +39,7 @@ import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
+import { t } from "../../i18n"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -216,7 +217,7 @@ export function Prompt(props: PromptProps) {
   function promptModelWarning() {
     toast.show({
       variant: "warning",
-      message: "Connect a provider to send prompts",
+      message: t("prompt.connectProvider"),
       duration: 3000,
     })
     if (sync.data.provider.length === 0) {
@@ -335,7 +336,7 @@ export function Prompt(props: PromptProps) {
   const promptCommands = createMemo(() =>
     [
       {
-        title: "Clear prompt",
+        title: t("prompt.clear"),
         name: "prompt.clear",
         category: "Prompt",
         hidden: true,
@@ -345,7 +346,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Submit prompt",
+        title: t("prompt.submit"),
         name: "prompt.submit",
         category: "Prompt",
         hidden: true,
@@ -358,7 +359,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Remove editor context",
+        title: t("prompt.removeEditorContext"),
         name: "prompt.editor_context.clear",
         category: "Prompt",
         enabled: Boolean(editorContext()),
@@ -368,7 +369,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Paste",
+        title: t("prompt.paste"),
         name: "prompt.paste",
         category: "Prompt",
         hidden: true,
@@ -390,7 +391,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Interrupt session",
+        title: t("prompt.interrupt"),
         name: "session.interrupt",
         category: "Session",
         hidden: true,
@@ -421,7 +422,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Open editor",
+        title: t("prompt.openEditor"),
         category: "Session",
         name: "prompt.editor",
         slashName: "editor",
@@ -513,7 +514,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Skills",
+        title: t("prompt.skills"),
         name: "prompt.skills",
         category: "Prompt",
         slashName: "skills",
@@ -533,8 +534,8 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Warp",
-        desc: "Change the workspace for the session",
+        title: t("prompt.warp"),
+        desc: t("prompt.warp.desc"),
         name: "workspace.set",
         category: "Session",
         enabled: Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
@@ -544,8 +545,8 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Move session",
-        desc: "Move to another project dir",
+        title: t("prompt.moveSession"),
+        desc: t("prompt.moveSession.desc"),
         name: "session.move",
         category: "Session",
         slashName: "move",
@@ -736,7 +737,7 @@ export function Prompt(props: PromptProps) {
   const stashCommands = createMemo(() =>
     [
       {
-        title: "Stash prompt",
+        title: t("prompt.stash"),
         name: "prompt.stash",
         category: "Prompt",
         enabled: !!store.prompt.input,
@@ -754,7 +755,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Stash pop",
+        title: t("prompt.stashPop"),
         name: "prompt.stash.pop",
         category: "Prompt",
         enabled: stash.list().length > 0,
@@ -770,7 +771,7 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Stash list",
+        title: t("prompt.stashList"),
         name: "prompt.stash.list",
         category: "Prompt",
         enabled: stash.list().length > 0,
@@ -829,7 +830,7 @@ export function Prompt(props: PromptProps) {
       bindings: [
         {
           key: "!",
-          desc: "Shell mode",
+          desc: t("prompt.shellMode.desc"),
           group: "Prompt",
           cmd: () => {
             setStore("placeholder", randomIndex(shell().length))
@@ -844,7 +845,7 @@ export function Prompt(props: PromptProps) {
     return {
       target: inputTarget,
       enabled: inputTarget() !== undefined && store.mode === "shell",
-      bindings: [{ key: "escape", desc: "Exit shell mode", group: "Prompt", cmd: () => setStore("mode", "normal") }],
+      bindings: [{ key: "escape", desc: t("prompt.exitShell.desc"), group: "Prompt", cmd: () => setStore("mode", "normal") }],
     }
   })
 
@@ -855,7 +856,7 @@ export function Prompt(props: PromptProps) {
         cursorVersion()
         return inputTarget() !== undefined && store.mode === "shell" && input?.visualCursor.offset === 0
       })(),
-      bindings: [{ key: "backspace", desc: "Exit shell mode", group: "Prompt", cmd: () => setStore("mode", "normal") }],
+      bindings: [{ key: "backspace", desc: t("prompt.exitShell.desc"), group: "Prompt", cmd: () => setStore("mode", "normal") }],
     }
   })
 
@@ -869,7 +870,7 @@ export function Prompt(props: PromptProps) {
       commands: [
         {
           name: "prompt.history.previous",
-          title: "Previous prompt history",
+          title: t("prompt.historyPrev"),
           category: "Prompt",
           run() {
             if (input.cursorOffset !== 0) {
@@ -901,7 +902,7 @@ export function Prompt(props: PromptProps) {
       commands: [
         {
           name: "prompt.history.next",
-          title: "Next prompt history",
+          title: t("prompt.historyNext"),
           category: "Prompt",
           run() {
             if (input.cursorOffset !== input.plainText.length) {
@@ -1013,7 +1014,7 @@ export function Prompt(props: PromptProps) {
         console.log("Creating a session failed:", res.error)
 
         toast.show({
-          message: "Creating a session failed. Open console for more details.",
+          message: t("prompt.createFailed"),
           variant: "error",
         })
 
@@ -1112,7 +1113,7 @@ export function Prompt(props: PromptProps) {
         )
         .catch((error) => {
           toast.show({
-            title: "Failed to send prompt",
+            title: t("prompt.sendFailed"),
             message: errorMessage(error),
             variant: "error",
           })
@@ -1447,7 +1448,7 @@ export function Prompt(props: PromptProps) {
                   {(agent) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
+                        {store.mode === "shell" ? t("prompt.shell") : Locale.titlecase(agent().name)}
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
@@ -1560,7 +1561,7 @@ export function Prompt(props: PromptProps) {
                         const r = retry()
                         if (!r) return
                         if (isTruncated()) {
-                          void DialogAlert.show(dialog, "Retry Error", r.message)
+                          void DialogAlert.show(dialog, t("session.retryError"), r.message)
                         }
                       }
 

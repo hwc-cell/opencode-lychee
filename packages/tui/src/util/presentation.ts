@@ -1,4 +1,5 @@
 import { logo } from "../logo"
+import { t } from "../i18n"
 
 const reset = "\x1b[0m"
 const bold = "\x1b[1m"
@@ -28,8 +29,8 @@ export function sessionEpilogue(input: { title: string; sessionID?: string }) {
   return [
     ...wordmark("  "),
     "",
-    `  ${weak("Session")}${bold}${input.title}${reset}`,
-    `  ${weak("Continue")}${bold}opencode -s ${input.sessionID}${reset}`,
+    `  ${weak(t("epilogue.session"))}${bold}${input.title}${reset}`,
+    `  ${weak(t("epilogue.continue"))}${bold}opencode -s ${input.sessionID}${reset}`,
     "",
   ].join("\n")
 }

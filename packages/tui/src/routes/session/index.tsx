@@ -27,6 +27,7 @@ import { Spinner } from "../../component/spinner"
 import { createSyntaxStyleMemo, generateSubtleSyntax, selectedForeground, useTheme } from "../../context/theme"
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
+import { t } from "../../i18n"
 import type {
   AssistantMessage,
   Part,
@@ -436,7 +437,7 @@ export function Session() {
       sessionID,
     })
     const status = sync.data.session_status[sessionID]
-    if (status?.type === "retry") void DialogAlert.show(dialog, "Retry Error", status.message)
+    if (status?.type === "retry") void DialogAlert.show(dialog, t("session.retryError"), status.message)
   }
 
   function moveFirstChild() {
@@ -465,7 +466,7 @@ export function Session() {
 
   const sessionCommandList = createMemo(() => [
     {
-      title: session()?.share?.url ? "Copy share link" : "Share session",
+      title: session()?.share?.url ? t("session.copyShareLink") : t("session.share"),
       value: "session.share",
       suggested: route.type === "session",
       category: "Session",
@@ -477,8 +478,8 @@ export function Session() {
         const copy = (url: string) =>
           clipboard
             .write?.(url)
-            .then(() => toast.show({ message: "Share URL copied to clipboard!", variant: "success" }))
-            .catch(() => toast.show({ message: "Failed to copy URL to clipboard", variant: "error" }))
+            .then(() => toast.show({ message: t("session.shareCopied"), variant: "success" }))
+            .catch(() => toast.show({ message: t("session.shareCopyFailed"), variant: "error" }))
         const url = session()?.share?.url
         if (url) {
           await copy(url)
@@ -486,7 +487,7 @@ export function Session() {
           return
         }
         if (!kv.get("share_consent", false)) {
-          const ok = await DialogConfirm.show(dialog, "Share Session", "Are you sure you want to share it?")
+          const ok = await DialogConfirm.show(dialog, t("session.share"), t("session.shareConfirm"))
           if (ok !== true) return
           kv.set("share_consent", true)
         }
@@ -497,7 +498,7 @@ export function Session() {
           .then((res) => copy(res.data!.share!.url))
           .catch((error) => {
             toast.show({
-              message: error instanceof Error ? error.message : "Failed to share session",
+              message: error instanceof Error ? error.message : t("session.shareFailed"),
               variant: "error",
             })
           })
@@ -505,7 +506,7 @@ export function Session() {
       },
     },
     {
-      title: "Rename session",
+      title: t("session.rename"),
       value: "session.rename",
       category: "Session",
       slash: {
@@ -516,7 +517,7 @@ export function Session() {
       },
     },
     {
-      title: "Jump to message",
+      title: t("session.jumpToMessage"),
       value: "session.timeline",
       category: "Session",
       slash: {
