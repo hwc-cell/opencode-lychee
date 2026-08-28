@@ -1,10 +1,6 @@
 <p align="center">
   <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
+    <img src="packages/ui/src/assets/favicon/lychee.png" alt="OpenCode-Lychee logo" width="560">
   </a>
 </p>
 <p align="center">AI-kodeagent med åpen kildekode.</p>
