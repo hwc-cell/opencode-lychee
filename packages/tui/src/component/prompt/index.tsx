@@ -97,10 +97,11 @@ export type PromptRef = {
   submit(): void
 }
 
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
+const USD_TO_CNY = 7.25
+
+function cny(amount: number) {
+  return `¥${(amount * USD_TO_CNY).toFixed(2)}`
+}
 
 const DRAFT_RETENTION_MIN_CHARS = 20
 
@@ -278,8 +279,35 @@ export function Prompt(props: PromptProps) {
     const cost = session?.cost ?? 0
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      cost: cost > 0 ? cny(cost) : undefined,
+      providerID: last.providerID,
     }
+  })
+
+  const [promptBalance, setPromptBalance] = createSignal<
+    { supported: boolean; currency?: string | null; amount?: string | null } | undefined
+  >()
+  createEffect(() => {
+    const providerID = usage()?.providerID
+    if (!providerID) return
+    let cancelled = false
+    sdk.client.provider
+      .balance({ providerID })
+      .then((res) => {
+        if (!cancelled) setPromptBalance(res.data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  })
+
+  const promptBalanceText = createMemo(() => {
+    const value = promptBalance()
+    if (!value?.supported || !value.amount) return
+    const amount = Number(value.amount)
+    const rate = value.currency === "USD" ? USD_TO_CNY : 1
+    return `¥${(amount * rate).toFixed(2)}`
   })
 
   const [store, setStore] = createStore<{
@@ -1664,11 +1692,16 @@ export function Prompt(props: PromptProps) {
                 <Match when={store.mode === "normal"}>
                   <Switch>
                     <Match when={usage()}>
-                      {(item) => (
-                        <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost].filter(Boolean).join(" · ")}
-                        </text>
-                      )}
+                      {(item) => {
+                        const bal = promptBalanceText()
+                        return (
+                          <text fg={theme.textMuted} wrapMode="none">
+                            {[item().context, item().cost, bal ? t("sidebar.balance", { amount: bal }) : undefined]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </text>
+                        )
+                      }}
                     </Match>
                     <Match when={true}>
                       <text fg={theme.text}>

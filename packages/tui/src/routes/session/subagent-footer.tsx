@@ -1,4 +1,4 @@
-import { createMemo, createSignal, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Show } from "solid-js"
 import { useRouteData } from "../../context/route"
 import { useSync } from "../../context/sync"
 import { useTheme } from "../../context/theme"
@@ -8,6 +8,13 @@ import { Locale } from "../../util/locale"
 import { t } from "../../i18n"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
+import { useSDK } from "../../context/sdk"
+
+const USD_TO_CNY = 7.25
+
+function cny(amount: number) {
+  return `¥${(amount * USD_TO_CNY).toFixed(2)}`
+}
 
 export function SubagentFooter() {
   const route = useRouteData("session")
@@ -44,15 +51,38 @@ export function SubagentFooter() {
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = session()?.cost ?? 0
 
-    const money = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    })
-
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      cost: cost > 0 ? cny(cost) : undefined,
+      providerID: last.providerID,
     }
+  })
+
+  const sdk = useSDK()
+  const [balance, setBalance] = createSignal<
+    { supported: boolean; currency?: string | null; amount?: string | null } | undefined
+  >()
+  createEffect(() => {
+    const providerID = usage()?.providerID
+    if (!providerID) return
+    let cancelled = false
+    sdk.client.provider
+      .balance({ providerID })
+      .then((res) => {
+        if (!cancelled) setBalance(res.data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  })
+
+  const balanceText = createMemo(() => {
+    const value = balance()
+    if (!value?.supported || !value.amount) return
+    const amount = Number(value.amount)
+    const rate = value.currency === "USD" ? USD_TO_CNY : 1
+    return `¥${(amount * rate).toFixed(2)}`
   })
 
   const { theme } = useTheme()
@@ -87,11 +117,16 @@ export function SubagentFooter() {
               </text>
             </Show>
             <Show when={usage()}>
-              {(item) => (
-                <text fg={theme.textMuted} wrapMode="none">
-                  {[item().context, item().cost].filter(Boolean).join(" · ")}
-                </text>
-              )}
+              {(item) => {
+                const bal = balanceText()
+                return (
+                  <text fg={theme.textMuted} wrapMode="none">
+                    {[item().context, item().cost, bal ? t("sidebar.balance", { amount: bal }) : undefined]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </text>
+                )
+              }}
             </Show>
           </box>
           <box flexDirection="row" gap={2}>

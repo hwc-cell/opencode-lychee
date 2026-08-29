@@ -7,7 +7,7 @@ type AuthEntry = { type: "oauth" | "api" | "wellknown"; key?: string; access?: s
 
 type BalanceDef = {
   url: string
-  env: string
+  env?: string
   parse: (json: Record<string, unknown>) => { currency: string; amount: string } | undefined
 }
 
@@ -48,6 +48,33 @@ const REGISTRY: Record<string, BalanceDef> = {
       return { currency: "USD", amount: String(limit) }
     },
   },
+  // https://docs.siliconflow.com/api-reference/userinfo/get-user-info
+  siliconflow: {
+    url: "https://api.siliconflow.cn/v1/user/info",
+    parse: (json) => {
+      const data = json.data as Record<string, unknown> | undefined
+      const balance = data?.balance
+      if (balance == null) return
+      return { currency: "USD", amount: String(balance) }
+    },
+  },
+  // https://open.bigmodel.cn/api/paas/v4/balance (智谱/GLM, 响应字段随套餐变化, 弹性解析)
+  zhipu: {
+    url: "https://open.bigmodel.cn/api/paas/v4/balance",
+    parse: (json) => {
+      const data = json.data as Record<string, unknown> | undefined
+      const pick = (obj: Record<string, unknown> | undefined) => {
+        if (!obj) return
+        for (const key of ["total_balance", "balance", "amount", "total", "available", "total_amount"]) {
+          const value = obj[key]
+          if (value != null && typeof value === "number" || typeof value === "string") return [key, String(value)] as const
+        }
+      }
+      const found = pick(data) ?? pick(json)
+      if (!found) return
+      return { currency: "CNY", amount: found[1] }
+    },
+  },
   // OpenAI credit grants 接口返回单位为美分
   openai: {
     url: "https://api.openai.com/dashboard/billing/credit_grants",
@@ -81,7 +108,7 @@ export async function checkBalance(providerID: string): Promise<BalanceResult> {
 
   const auth = await readAuthEntry(providerID)
   const key = auth ? (auth.type === "oauth" ? auth.access : auth.key ?? auth.token) : undefined
-  const envKey = process.env[def.env]
+  const envKey = def.env ? process.env[def.env] : undefined
   const token = (envKey || key)?.trim()
   if (!token) return { supported: false }
 
