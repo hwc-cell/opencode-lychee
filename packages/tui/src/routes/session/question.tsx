@@ -278,7 +278,17 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
               },
               { key: "down", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
               { key: "j", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
-              { key: "return", desc: "Select answer", group: "Question", cmd: () => selectOption() },
+              { key: "return", desc: t("question.selectAnswer"), group: "Question", cmd: () => selectOption() },
+              ...(multi()
+                ? [
+                    ...tuiConfig.keybinds.get("question.toggle").map((binding) => ({
+                      ...binding,
+                      desc: t("question.toggle.desc"),
+                      group: "Question",
+                      cmd: () => selectOption(),
+                    })),
+                  ]
+                : []),
               { key: "escape", desc: t("question.reject"), group: "Question", cmd: () => reject() },
               ...tuiConfig.keybinds.get("app.exit"),
             ]),

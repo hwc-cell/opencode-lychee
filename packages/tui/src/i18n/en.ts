@@ -117,6 +117,8 @@ export const dict: Dict = {
   "question.reject": "Reject question",
   "question.submitAnswer": "Submit answer",
   "question.confirm": "Confirm",
+  "question.selectAnswer": "Toggle answer option",
+  "question.toggle.desc": "切换答案选项",
 
   // Sidebar
   "sidebar.context": "Context",

@@ -45,10 +45,21 @@ export async function killTree(proc: ChildProcess, opts?: { exited?: () => boole
   }
 
   try {
-    process.kill(-pid, "SIGTERM")
-    await sleep(SIGKILL_TIMEOUT_MS)
-    if (!opts?.exited?.()) {
-      process.kill(-pid, "SIGKILL")
+    // 组击杀只对"独立进程组"(我们以 detached 拉起的子进程)安全。
+    // pid 为 0/1 时 kill(-pid) 等价于 kill(0)/(-1), 会把信号广播到调用者所在组乃至全部用户进程
+    // (上游 #45938: macOS 上退出时误杀用户整个终端会话/其他应用)。
+    if (pid > 1) {
+      process.kill(-pid, "SIGTERM")
+      await sleep(SIGKILL_TIMEOUT_MS)
+      if (!opts?.exited?.()) {
+        process.kill(-pid, "SIGKILL")
+      }
+    } else {
+      proc.kill("SIGTERM")
+      await sleep(SIGKILL_TIMEOUT_MS)
+      if (!opts?.exited?.()) {
+        proc.kill("SIGKILL")
+      }
     }
   } catch {
     proc.kill("SIGTERM")
