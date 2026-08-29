@@ -19,6 +19,14 @@ export function host(overrides: Overrides = {}): Plugin.Context {
   return {
     app: overrides.app ?? { name: "test", version: "test", channel: "test" },
     options: {},
+    rpc:
+      overrides.rpc ??
+      Object.assign(
+        () => {
+          throw new Error("unused rpc.client")
+        },
+        { register: () => Effect.die("unused rpc.register") },
+      ),
     agent: overrides.agent ?? {
       get: () => Effect.die("unused agent.get"),
       list: () => Effect.die("unused agent.list"),

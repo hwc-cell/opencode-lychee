@@ -11,6 +11,7 @@ import type { IntegrationDomain } from "./integration.js"
 import type { MCPDomain } from "./mcp.js"
 import type { PermissionDomain } from "./permission.js"
 import type { ReferenceDomain } from "./reference.js"
+import type { RpcDomain } from "./rpc.js"
 import type { SessionDomain } from "./session.js"
 import type { ShellDomain } from "./shell.js"
 import type { SkillDomain } from "./skill.js"
@@ -33,6 +34,7 @@ export interface Context {
   readonly permission: PermissionDomain
   readonly plugin: PluginApi
   readonly reference: ReferenceDomain
+  readonly rpc: RpcDomain
   readonly session: SessionDomain
   readonly shell: ShellDomain
   readonly skill: SkillDomain

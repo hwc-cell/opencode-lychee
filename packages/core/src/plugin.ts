@@ -19,6 +19,7 @@ import { PluginHost } from "./plugin/host.js"
 import { PluginRuntime } from "./plugin/runtime.js"
 import { WebSearch } from "./websearch.js"
 import { Reference } from "./reference.js"
+import { Rpc } from "./rpc.js"
 import { Skill } from "./skill.js"
 import { State } from "./state.js"
 import { Tool } from "./tool.js"
@@ -200,6 +201,7 @@ export const node = makeLocationNode({
     MCP.node,
     Location.node,
     Reference.node,
+    Rpc.node,
     Skill.node,
     Tool.node,
     Vcs.node,
