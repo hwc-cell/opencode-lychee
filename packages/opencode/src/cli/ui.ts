@@ -1,8 +1,6 @@
 import { EOL } from "os"
 import { Schema } from "effect"
-import { logo as glyphs } from "./logo"
-
-const wordmark = glyphs.left.map((row, index) => `${row} ${glyphs.right[index] ?? ""}`)
+import { icon } from "./logo"
 
 export class CancelledError extends Schema.TaggedErrorClass<CancelledError>()("UICancelledError", {}) {}
 
@@ -41,60 +39,35 @@ export function empty() {
 }
 
 export function logo(pad?: string) {
-  if (!process.stdout.isTTY && !process.stderr.isTTY) {
-    const result = []
-    for (const row of wordmark) {
-      if (pad) result.push(pad)
-      result.push(row)
-      result.push(EOL)
-    }
-    return result.join("").trimEnd()
-  }
-
-  const result: string[] = []
+  const pal = icon.palette as Record<string, [number, number, number]>
   const reset = "\x1b[0m"
-  const left = {
-    fg: "\x1b[90m",
-    shadow: "\x1b[38;5;235m",
-    bg: "\x1b[48;5;235m",
-  }
-  const right = {
-    fg: reset,
-    shadow: "\x1b[38;5;238m",
-    bg: "\x1b[48;5;238m",
-  }
-  const gap = " "
-  const draw = (line: string, fg: string, shadow: string, bg: string) => {
-    const parts: string[] = []
-    for (const char of line) {
-      if (char === "_") {
-        parts.push(bg, " ", reset)
-        continue
-      }
-      if (char === "^") {
-        parts.push(fg, bg, "▀", reset)
-        continue
-      }
-      if (char === "~") {
-        parts.push(shadow, "▀", reset)
-        continue
-      }
-      if (char === " ") {
-        parts.push(" ")
-        continue
-      }
-      parts.push(fg, char, reset)
-    }
-    return parts.join("")
-  }
-  glyphs.left.forEach((row, index) => {
+  const tty = process.stdout.isTTY || process.stderr.isTTY
+  const result: string[] = []
+  for (let i = 0; i < icon.top.length; i++) {
+    const topRow = icon.top[i]
+    const bottomRow = icon.bottom[i]
     if (pad) result.push(pad)
-    result.push(draw(row, left.fg, left.shadow, left.bg))
-    result.push(gap)
-    const other = glyphs.right[index] ?? ""
-    result.push(draw(other, right.fg, right.shadow, right.bg))
+    for (let x = 0; x < topRow.length; x++) {
+      const top = pal[topRow[x]]
+      const bottom = pal[bottomRow[x]]
+      if (tty) {
+        if (top && bottom) {
+          result.push(
+            `\x1b[38;2;${top[0]};${top[1]};${top[2]}m\x1b[48;2;${bottom[0]};${bottom[1]};${bottom[2]}m▀${reset}`,
+          )
+        } else if (top) {
+          result.push(`\x1b[38;2;${top[0]};${top[1]};${top[2]}m▀${reset}`)
+        } else if (bottom) {
+          result.push(`\x1b[38;2;10;10;10m\x1b[48;2;${bottom[0]};${bottom[1]};${bottom[2]}m▀${reset}`)
+        } else {
+          result.push(" ")
+        }
+      } else {
+        result.push(top && bottom ? "█" : top ? "▀" : bottom ? "▄" : " ")
+      }
+    }
     result.push(EOL)
-  })
+  }
   return result.join("").trimEnd()
 }
 

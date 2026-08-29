@@ -1,58 +1,52 @@
-import { RGBA, TextAttributes } from "@opentui/core"
-import { For, type JSX } from "solid-js"
-import { tint, useTheme } from "../context/theme"
-import { logo } from "../logo"
+import { RGBA } from "@opentui/core"
+import { For } from "solid-js"
+import { icon } from "../logo"
+import { useTheme } from "../context/theme"
+
+const palette = Object.fromEntries(
+  Object.entries(icon.palette).map(([key, value]) => [key, RGBA.fromValues(value[0], value[1], value[2], 1)]),
+) as Record<string, RGBA>
 
 export function Logo() {
   const { theme } = useTheme()
 
-  const renderLine = (line: string, fg: RGBA, bold: boolean): JSX.Element[] => {
-    const shadow = tint(theme.background, fg, 0.25)
-    const attrs = bold ? TextAttributes.BOLD : undefined
-    return Array.from(line).map((char) => {
-      if (char === "_") {
-        return (
-          <text fg={fg} bg={shadow} attributes={attrs} selectable={false}>
-            {" "}
-          </text>
-        )
-      }
-      if (char === "^") {
-        return (
-          <text fg={fg} bg={shadow} attributes={attrs} selectable={false}>
-            ▀
-          </text>
-        )
-      }
-      if (char === "~") {
-        return (
-          <text fg={shadow} attributes={attrs} selectable={false}>
-            ▀
-          </text>
-        )
-      }
-      if (char === ",") {
-        return (
-          <text fg={shadow} attributes={attrs} selectable={false}>
-            ▄
-          </text>
-        )
-      }
-      return (
-        <text fg={fg} attributes={attrs} selectable={false}>
-          {char}
-        </text>
-      )
-    })
-  }
-
   return (
     <box>
-      <For each={logo.left}>
-        {(line, index) => (
-          <box flexDirection="row" gap={1}>
-            <box flexDirection="row">{renderLine(line, theme.textMuted, false)}</box>
-            <box flexDirection="row">{renderLine(logo.right[index()], theme.text, true)}</box>
+      <For each={icon.top}>
+        {(topRow, rowIndex) => (
+          <box height={1} flexDirection="row">
+            <text>
+              <For each={Array.from(topRow)}>
+                {(ch, colIndex) => {
+                  const i = rowIndex()
+                  const bottomCh = icon.bottom[i][colIndex()]
+                  const top = palette[ch]
+                  const bottom = palette[bottomCh]
+                  if (top && bottom) {
+                    return (
+                      <span style={{ fg: top, bg: bottom }}>
+                        ▀
+                      </span>
+                    )
+                  }
+                  if (top) {
+                    return (
+                      <span style={{ fg: top, bg: theme.background }}>
+                        ▀
+                      </span>
+                    )
+                  }
+                  if (bottom) {
+                    return (
+                      <span style={{ fg: theme.background, bg: bottom }}>
+                        ▀
+                      </span>
+                    )
+                  }
+                  return <span> </span>
+                }}
+              </For>
+            </text>
           </box>
         )}
       </For>
