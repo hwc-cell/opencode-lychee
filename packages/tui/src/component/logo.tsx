@@ -4,7 +4,10 @@ import { icon } from "../logo"
 import { useTheme } from "../context/theme"
 
 const palette = Object.fromEntries(
-  Object.entries(icon.palette).map(([key, value]) => [key, RGBA.fromValues(value[0], value[1], value[2], 1)]),
+  Object.entries(icon.palette).map(([key, value]) => [
+    key,
+    RGBA.fromInts(value[0], value[1], value[2]),
+  ]),
 ) as Record<string, RGBA>
 
 export function Logo() {
