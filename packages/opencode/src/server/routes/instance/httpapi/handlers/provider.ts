@@ -1,4 +1,5 @@
 import { ProviderAuth } from "@/provider/auth"
+import { ProviderBalance } from "@/provider/balance"
 import { Config } from "@/config/config"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
@@ -107,9 +108,20 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       return true
     })
 
+    const balance = Effect.fn("ProviderHttpApi.balance")(function* (ctx: {
+      params: { providerID: ProviderV2.ID }
+    }) {
+      const credentials = yield* authStore.all().pipe(Effect.orDie)
+      return yield* Effect.promise(
+        (): Promise<ProviderBalance.BalanceResult> =>
+          ProviderBalance.checkBalance(ctx.params.providerID, credentials[ctx.params.providerID]),
+      )
+    })
+
     return handlers
       .handle("list", list)
       .handle("auth", auth)
+      .handle("balance", balance)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)
   }),

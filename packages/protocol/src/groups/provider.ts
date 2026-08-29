@@ -5,6 +5,12 @@ import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { ProviderNotFoundError, ServiceUnavailableError } from "../errors"
 import { LocationQuery, locationQueryOpenApi } from "./location"
 
+export const Balance = Schema.Struct({
+  supported: Schema.Boolean,
+  currency: Schema.optional(Schema.String),
+  amount: Schema.optional(Schema.String),
+})
+
 export const ProviderGroup = HttpApiGroup.make("server.provider")
   .add(
     HttpApiEndpoint.get("provider.list", "/api/provider", {
@@ -34,6 +40,21 @@ export const ProviderGroup = HttpApiGroup.make("server.provider")
           identifier: "v2.provider.get",
           summary: "Get provider",
           description: "Retrieve a single AI provider so clients can inspect its availability and endpoint settings.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.get("provider.balance", "/api/provider/:providerID/balance", {
+      params: { providerID: Provider.ID },
+      success: Location.response(Balance),
+      error: [ProviderNotFoundError, ServiceUnavailableError],
+    })
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.provider.balance",
+          summary: "Query provider account balance",
+          description:
+            "Query the connected provider account balance through its official API. Unsupported providers respond with supported: false.",
         }),
       ),
   )

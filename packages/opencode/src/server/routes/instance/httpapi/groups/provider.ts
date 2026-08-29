@@ -31,6 +31,12 @@ export class ProviderAuthApiError extends Schema.ErrorClass<ProviderAuthApiError
   { httpApiStatus: 400 },
 ) {}
 
+export const Balance = Schema.Struct({
+  supported: Schema.Boolean,
+  currency: Schema.optional(Schema.String),
+  amount: Schema.optional(Schema.String),
+})
+
 export const ProviderApi = HttpApi.make("provider")
   .add(
     HttpApiGroup.make("provider")
@@ -43,6 +49,17 @@ export const ProviderApi = HttpApi.make("provider")
             identifier: "provider.list",
             summary: "List providers",
             description: "Get a list of all available AI providers, including both available and connected ones.",
+          }),
+        ),
+        HttpApiEndpoint.get("balance", `${root}/:providerID/balance`, {
+          params: { providerID: ProviderV2.ID },
+          query: WorkspaceRoutingQuery,
+          success: described(Balance, "Provider account balance"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.balance",
+            summary: "Query provider account balance",
+            description: "Query the connected provider account balance through its official API.",
           }),
         ),
         HttpApiEndpoint.get("auth", `${root}/auth`, {

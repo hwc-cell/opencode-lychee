@@ -45,6 +45,8 @@ import type {
   ProvidersListOutput,
   ProvidersGetInput,
   ProvidersGetOutput,
+  ProvidersBalanceInput,
+  ProvidersBalanceOutput,
   IntegrationsListInput,
   IntegrationsListOutput,
   IntegrationsGetInput,
@@ -540,6 +542,17 @@ export function make(options: ClientOptions) {
             method: "GET",
             path: `/api/provider/${encodeURIComponent(input.providerID)}`,
             query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [404, 503, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      balance: (input: ProvidersBalanceInput, requestOptions?: RequestOptions) =>
+        request<ProvidersBalanceOutput>(
+          {
+            method: "GET",
+            path: `/api/provider/${encodeURIComponent(input.providerID)}/balance`,
             successStatus: 200,
             declaredStatuses: [404, 503, 401, 400],
             empty: false,

@@ -135,6 +135,7 @@ export const dict: Dict = {
   "sidebar.tokens": "{tokens} tokens",
   "sidebar.percentUsed": "{percent}% 已使用",
   "sidebar.spent": "已花费 {cost}",
+  "sidebar.balance": "余额 ¥{amount}",
   "sidebar.active": "个活跃",
   "sidebar.error": "个错误",
   "sidebar.errors": "个错误",

@@ -2051,6 +2051,17 @@ export type ProvidersGetOutput = {
   }
 }
 
+export type ProvidersBalanceInput = { readonly providerID: { readonly providerID: string }["providerID"] }
+
+export type ProvidersBalanceOutput = {
+  readonly location: {
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly supported: boolean; readonly currency?: string | null; readonly amount?: string | null }
+}
+
 export type IntegrationsListInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined

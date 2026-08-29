@@ -4,6 +4,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { ProviderNotFoundError } from "@opencode-ai/protocol/errors"
 import { response } from "../location"
+import { checkBalance } from "../provider-balance"
 
 export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (handlers) =>
   Effect.gen(function* () {
@@ -26,6 +27,19 @@ export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (han
               message: `Provider not found: ${ctx.params.providerID}`,
             })
           return yield* response(Effect.succeed(provider))
+        }),
+      )
+      .handle(
+        "provider.balance",
+        Effect.fn(function* (ctx) {
+          const catalog = yield* Catalog.Service
+          const provider = yield* catalog.provider.get(ctx.params.providerID)
+          if (!provider)
+            return yield* new ProviderNotFoundError({
+              providerID: ctx.params.providerID,
+              message: `Provider not found: ${ctx.params.providerID}`,
+            })
+          return yield* response(Effect.promise(() => checkBalance(ctx.params.providerID)))
         }),
       )
   }),

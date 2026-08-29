@@ -145,6 +145,8 @@ import type {
   PromptInput,
   ProviderAuthErrors,
   ProviderAuthResponses,
+  ProviderBalanceErrors,
+  ProviderBalanceResponses,
   ProviderListErrors,
   ProviderListResponses,
   ProviderOauthAuthorizeErrors,
@@ -311,6 +313,8 @@ import type {
   V2ProjectCopyRefreshResponses,
   V2ProjectCopyRemoveErrors,
   V2ProjectCopyRemoveResponses,
+  V2ProviderBalanceErrors,
+  V2ProviderBalanceResponses,
   V2ProviderGetErrors,
   V2ProviderGetResponses,
   V2ProviderListErrors,
@@ -3324,6 +3328,38 @@ export class Provider extends HeyApiClient {
   }
 
   /**
+   * Query provider account balance
+   *
+   * Query the connected provider account balance through its official API.
+   */
+  public balance<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderBalanceResponses, ProviderBalanceErrors, ThrowOnError>({
+      url: "/provider/{providerID}/balance",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get provider auth methods
    *
    * Retrieve available authentication methods for all AI providers.
@@ -5948,6 +5984,25 @@ export class Provider2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<V2ProviderGetResponses, V2ProviderGetErrors, ThrowOnError>({
       url: "/api/provider/{providerID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Query provider account balance
+   *
+   * Query the connected provider account balance through its official API. Unsupported providers respond with supported: false.
+   */
+  public balance<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "providerID" }] }])
+    return (options?.client ?? this.client).get<V2ProviderBalanceResponses, V2ProviderBalanceErrors, ThrowOnError>({
+      url: "/api/provider/{providerID}/balance",
       ...options,
       ...params,
     })

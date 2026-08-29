@@ -9332,6 +9332,40 @@ export type ProviderListResponses = {
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
 
+export type ProviderBalanceData = {
+  body?: never
+  path: {
+    providerID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/{providerID}/balance"
+}
+
+export type ProviderBalanceErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderBalanceError = ProviderBalanceErrors[keyof ProviderBalanceErrors]
+
+export type ProviderBalanceResponses = {
+  /**
+   * Provider account balance
+   */
+  200: {
+    supported: boolean
+    currency?: string
+    amount?: string
+  }
+}
+
+export type ProviderBalanceResponse = ProviderBalanceResponses[keyof ProviderBalanceResponses]
+
 export type ProviderAuthData = {
   body?: never
   path?: never
@@ -12159,6 +12193,52 @@ export type V2ProviderGetResponses = {
 }
 
 export type V2ProviderGetResponse = V2ProviderGetResponses[keyof V2ProviderGetResponses]
+
+export type V2ProviderBalanceData = {
+  body?: never
+  path: {
+    providerID: string
+  }
+  query?: never
+  url: "/api/provider/{providerID}/balance"
+}
+
+export type V2ProviderBalanceErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ProviderNotFoundError
+   */
+  404: ProviderNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type V2ProviderBalanceError = V2ProviderBalanceErrors[keyof V2ProviderBalanceErrors]
+
+export type V2ProviderBalanceResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      supported: boolean
+      currency?: string
+      amount?: string
+    }
+  }
+}
+
+export type V2ProviderBalanceResponse = V2ProviderBalanceResponses[keyof V2ProviderBalanceResponses]
 
 export type V2IntegrationListData = {
   body?: never

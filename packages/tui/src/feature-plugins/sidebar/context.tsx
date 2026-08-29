@@ -1,21 +1,51 @@
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo } from "solid-js"
+import { createEffect, createMemo, createSignal, Show } from "solid-js"
 import { t } from "../../i18n"
+import { useSDK } from "../../context/sdk"
 
 const id = "internal:sidebar-context"
 
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
+const USD_TO_CNY = 7.25
+
+function formatCNY(amount: number, currency?: string | null) {
+  const cny = currency === "USD" ? amount * USD_TO_CNY : amount
+  return `¥${cny.toFixed(2)}`
+}
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
+  const sdk = useSDK()
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
   const session = createMemo(() => props.api.state.session.get(props.session_id))
   const cost = createMemo(() => session()?.cost ?? 0)
+  const [balance, setBalance] = createSignal<
+    { supported: boolean; currency?: string | null; amount?: string | null } | undefined
+  >()
+
+  createEffect(() => {
+    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    if (!last) return
+    let cancelled = false
+    sdk.client.provider
+      .balance({ providerID: last.providerID })
+      .then((res) => {
+        if (!cancelled) setBalance(res.data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  })
+
+  const balanceText = createMemo(() => {
+    const value = balance()
+    if (!value?.supported || !value.amount) return
+    const amount = Number(value.amount)
+    const cny = value.currency === "USD" ? amount * USD_TO_CNY : amount
+    return cny.toFixed(2)
+  })
 
   const state = createMemo(() => {
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
@@ -42,7 +72,12 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       </text>
       <text fg={theme().textMuted}>{t("sidebar.tokens", { tokens: state().tokens.toLocaleString() })}</text>
       <text fg={theme().textMuted}>{t("sidebar.percentUsed", { percent: state().percent ?? 0 })}</text>
-      <text fg={theme().textMuted}>{t("sidebar.spent", { cost: money.format(cost()) })}</text>
+      <text fg={theme().textMuted}>{t("sidebar.spent", { cost: formatCNY(cost()) })}</text>
+      <Show when={balanceText()}>
+        {(text) => (
+          <text fg={theme().textMuted}>{t("sidebar.balance", { amount: text() })}</text>
+        )}
+      </Show>
     </box>
   )
 }
