@@ -36,7 +36,7 @@ export function sessionEpilogue(input: { title: string; sessionID?: string }) {
     ...iconArt("  "),
     "",
     `  ${weak(t("epilogue.session"))}${bold}${input.title}${reset}`,
-    `  ${weak(t("epilogue.continue"))}${bold}opencode -s ${input.sessionID}${reset}`,
+    `  ${weak(t("epilogue.continue"))}${bold}lychee -s ${input.sessionID}${reset}`,
     "",
   ].join("\n")
 }
