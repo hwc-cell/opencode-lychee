@@ -154,6 +154,16 @@ export const dict: Dict = {
   "alert.confirm.desc": "Confirm alert",
   "alert.ok": "ok",
 
+  // About
+  "cmd.about": "About OpenCode-Lychee",
+  "about.title": "About OpenCode-Lychee",
+  "about.body": "OpenCode-Lychee is an AI coding agent derived from the open source project OpenCode.",
+  "about.upstream.label": "Upstream project",
+  "about.upstream.url": "https://github.com/anomalyco/opencode",
+  "about.bilibili.label": "Modifier on Bilibili",
+  "about.bilibili.url": "https://space.bilibili.com/3493128967293256",
+  "about.close.desc": "Close about",
+
   // Help dialog
   "help.title": "Help",
   "help.close.desc": "Close help",

@@ -154,6 +154,16 @@ export const dict: Dict = {
   "alert.confirm.desc": "确认对话框",
   "alert.ok": "确定",
 
+  // About
+  "cmd.about": "关于 OpenCode-Lychee",
+  "about.title": "关于 OpenCode-Lychee",
+  "about.body": "OpenCode-Lychee 是由开源 AI 编码代理 OpenCode 改造而来的衍生版本。",
+  "about.upstream.label": "源项目",
+  "about.upstream.url": "https://github.com/anomalyco/opencode",
+  "about.bilibili.label": "改造者 Bilibili",
+  "about.bilibili.url": "https://space.bilibili.com/3493128967293256",
+  "about.close.desc": "关闭关于",
+
   // Help dialog
   "help.title": "帮助",
   "help.close.desc": "关闭帮助",
