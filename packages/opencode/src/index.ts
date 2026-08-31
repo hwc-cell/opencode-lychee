@@ -11,6 +11,7 @@ import { ModelsCommand } from "./cli/cmd/models"
 import { UI } from "./cli/ui"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { FormatError } from "./cli/error"
+import { explainErrorText } from "@opencode-ai/tui/i18n/errors"
 import { ServeCommand } from "./cli/cmd/serve"
 import { DebugCommand } from "./cli/cmd/debug"
 import { StatsCommand } from "./cli/cmd/stats"
@@ -128,7 +129,7 @@ try {
   }
 } catch (e) {
   const formatted = FormatError(e)
-  if (formatted) UI.error(formatted)
+  if (formatted) UI.error(explainErrorText(formatted) ?? formatted)
   if (formatted === undefined) {
     UI.error("Unexpected error" + EOL)
     process.stderr.write(errorMessage(e) + EOL)

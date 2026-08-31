@@ -28,6 +28,7 @@ import { createSyntaxStyleMemo, generateSubtleSyntax, selectedForeground, useThe
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
 import { t } from "../../i18n"
+import { explainErrorText } from "../../i18n/errors"
 import type {
   AssistantMessage,
   Part,
@@ -437,7 +438,8 @@ export function Session() {
       sessionID,
     })
     const status = sync.data.session_status[sessionID]
-    if (status?.type === "retry") void DialogAlert.show(dialog, t("session.retryError"), status.message)
+    if (status?.type === "retry")
+      void DialogAlert.show(dialog, t("session.retryError"), explainErrorText(status.message) ?? status.message)
   }
 
   function moveFirstChild() {
