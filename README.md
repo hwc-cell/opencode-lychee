@@ -8,45 +8,45 @@
 <h1 align="center">OpenCode-Lychee 🍈</h1>
 
 <p align="center">
-  <em>The AI coding agent derived from <a href="https://github.com/anomalyco/opencode">OpenCode</a> — with a Chinese face.</em>
+  <em>由 <a href="https://github.com/anomalyco/opencode">OpenCode</a> 改造而来的 AI 编码代理 —— 一张中文脸。</em>
 </p>
 
 <p align="center">
-  <a href="README.zh.md">简体中文</a> ·
-  <a href="https://github.com/anomalyco/opencode">Upstream Project</a>
+  <a href="README.en.md">English</a> ·
+  <a href="https://github.com/anomalyco/opencode">源项目</a>
 </p>
 
 ---
 
-## What is this?
+## 这是什么?
 
-**OpenCode-Lychee** is a fork of the open source AI coding agent [OpenCode](https://github.com/anomalyco/opencode) (MIT licensed, maintained by the opencode community), rebranded and localized for Chinese developers.
+**OpenCode-Lychee(荔枝)** 是基于开源 AI 编码代理 [OpenCode](https://github.com/anomalyco/opencode)(MIT 协议,opencode 社区维护)改写的中文本地化衍生版本。
 
-### Features we added
+### 我们新增的能力
 
-- 🇨🇳 **Chinese UI** — the terminal interface, command palette, permission dialogs, help text and CLI output are fully localized in Chinese (auto-detected via `LANG=zh_CN*` or `OPENCODE_LANG=zh`).
-- 🍈 **Lychee branding** — a true-color lychee icon rendered in the terminal, plus a pixel wordmark.
-- ℹ️ **`/about` command** — find out where this project came from and who built it.
-- 🚀 **Quick launch** — type `OpenCode-Lychee` (or `lychee`) in your terminal to start.
+- 🇨🇳 **中文界面** —— 终端界面、命令面板、权限弹窗、帮助文本、CLI 输出全部中文化(检测到 `LANG=zh_CN*` 或设置 `OPENCODE_LANG=zh` 自动生效)
+- 🍈 **荔枝品牌** —— 终端里真彩色渲染的荔枝图标 + 像素字画
+- ℹ️ **`/about` 命令** —— 随时查看本项目出处与改造者
+- 🚀 **快捷启动** —— 终端输入 `OpenCode-Lychee`(或 `lychee`)即可打开
 
-Everything else — the session engine, plugin system, tool registry, model compatibility — comes straight from upstream OpenCode and stays in sync with it.
+其余一切——会话引擎、插件系统、工具注册表、模型兼容性——全部继承自上游 OpenCode,并保持同步。
 
-## Credits
+## 出品信息
 
 | | |
 |---|---|
-| Upstream project | [anomalyco/opencode](https://github.com/anomalyco/opencode) · [opencode.ai](https://opencode.ai) |
-| Modified by | [hwc-cell on Bilibili](https://space.bilibili.com/3493128967293256) |
+| 源项目 | [anomalyco/opencode](https://github.com/anomalyco/opencode) · [opencode.ai](https://opencode.ai) |
+| 改造者 | [hwc-cell 的 Bilibili](https://space.bilibili.com/3493128967293256) |
 
-This fork keeps the original MIT license and all upstream copyright notices. See [LICENSE](LICENSE).
+本 fork 保留原始 MIT 协议及上游全部版权声明,详见 [LICENSE](LICENSE)。
 
-## Building from source
+## 从源码构建
 
 ```bash
 git clone https://github.com/hwc-cell/opencode-lychee.git
 cd opencode-lychee
 bun install
-cd packages/opencode && bun run dev   # start the TUI
+cd packages/opencode && bun run dev   # 启动 TUI
 ```
 
-> Requires [bun](https://bun.sh). The upstream docs remain valid for configuration, plugins, and providers.
+> 需要 [bun](https://bun.sh)。配置、插件、供应商等用法沿用上游文档。
