@@ -190,6 +190,8 @@ export const dict: Dict = {
   "autolychee.disable": "Disable",
   "autolychee.pasteKey": "Paste key",
   "autolychee.busy": "Checking…",
+  "summary.statusOn": "Summary:on",
+  "summary.statusOff": "Summary:off",
   "help.title": "Help",
   "help.close.desc": "Close help",
   "help.press": "Press {shortcut} to see all available actions and commands in any context.",

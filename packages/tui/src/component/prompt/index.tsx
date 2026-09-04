@@ -1683,6 +1683,9 @@ export function Prompt(props: PromptProps) {
           </Switch>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
+              <text fg={kv.get("lychee_summary", false) ? theme.success : theme.textMuted}>
+                {kv.get("lychee_summary", false) ? t("summary.statusOn") : t("summary.statusOff")}
+              </text>
               <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
                 {(file) => (
                   <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>

@@ -190,6 +190,8 @@ export const dict: Dict = {
   "autolychee.disable": "关闭",
   "autolychee.pasteKey": "粘贴密钥",
   "autolychee.busy": "校验中…",
+  "summary.statusOn": "小结:开",
+  "summary.statusOff": "小结:关",
   "help.title": "帮助",
   "help.close.desc": "关闭帮助",
   "help.press": "按 {shortcut} 可在任意上下文中查看所有可用的操作与命令。",
