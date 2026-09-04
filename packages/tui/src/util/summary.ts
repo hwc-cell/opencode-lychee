@@ -27,18 +27,14 @@ type SummarySdk = {
 
 // ---------- 退出钩子注册表: 会话关闭(退出 TUI)时异步执行 ----------
 type ExitHook = () => Promise<void>
-const hooks = new Set<ExitHook>()
+const hooks = new Map<string, ExitHook>()
 
-export function addExitHook(hook: ExitHook) {
-  hooks.add(hook)
-}
-
-export function removeExitHook(hook: ExitHook) {
-  hooks.delete(hook)
+export function addExitHook(id: string, hook: ExitHook) {
+  hooks.set(id, hook)
 }
 
 export async function runExitHooks() {
-  for (const hook of hooks) {
+  for (const hook of [...hooks.values()]) {
     try {
       await Promise.race([hook(), sleep(120_000)])
     } catch {

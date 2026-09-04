@@ -71,7 +71,7 @@ import { DialogExportOptions } from "../../ui/dialog-export-options"
 import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { sessionEpilogue } from "../../util/presentation"
-import { addExitHook, removeExitHook, generateSessionSummary } from "../../util/summary"
+import { addExitHook, generateSessionSummary } from "../../util/summary"
 import { buildSessionRecord, ledgerUpload } from "../../util/ledger"
 import { setPreLayoutSiblingMargin } from "../../util/layout"
 import { useTuiConfig } from "../../config"
@@ -226,14 +226,12 @@ export function Session() {
           sessionID,
           messages: latest,
         })
-        if (file) process.stderr.write(`🍈 荔枝小结已保存: ${file}\n`)
-        else process.stderr.write("⚠️ 荔枝小结生成失败(未获得总结)\n")
-      } catch (error) {
-        process.stderr.write(`⚠️ 荔枝小结生成失败: ${errorMessage(error)}\n`)
-      }
+        if (file) {
+          process.stderr.write(`🍈 荔枝小结已保存: ${file}\n`)
+        } else process.stderr.write("⚠️ 荔枝小结生成失败(未获得总结)\n")      } catch (error) {
+        process.stderr.write(`⚠️ 荔枝小结生成失败: ${errorMessage(error)}\n`)      }
     }
-    addExitHook(hook)
-    onCleanup(() => removeExitHook(hook))
+    addExitHook("summary", hook)
   })
 
   // /autolychee: 会话结束后自动记账(可开关)
@@ -260,8 +258,7 @@ export function Session() {
         process.stderr.write(`⚠️ 自动记账失败: ${result.message}\n`)
       }
     }
-    addExitHook(hook)
-    onCleanup(() => removeExitHook(hook))
+    addExitHook("autolychee", hook)
   })
   onCleanup(() => setEpilogue())
   const children = createMemo(() => {
