@@ -27,6 +27,7 @@
 - 🇨🇳 **Chinese UI** — the terminal interface, command palette, permission dialogs, help text and CLI output are fully localized in Chinese (auto-detected via `LANG=zh_CN*` or `OPENCODE_LANG=zh`).
 - 🍈 **Lychee branding** — a true-color lychee icon rendered in the terminal, plus a pixel wordmark.
 - ℹ️ **`/about` command** — find out where this project came from and who built it.
+- 🍈 **Lychee Summary** — when a session closes, the current AI automatically writes a Chinese summary card into `.opencode/reports/` (toggle with `/summary`).
 - 🚀 **Quick launch** — type `OpenCode-Lychee` (or `lychee`) in your terminal to start.
 
 Everything else — the session engine, plugin system, tool registry, model compatibility — comes straight from upstream OpenCode and stays in sync with it.
