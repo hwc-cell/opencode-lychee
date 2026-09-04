@@ -168,6 +168,9 @@ export const dict: Dict = {
   "about.close.desc": "Close about",
 
   // Help dialog
+
+  "cmd.summaryOn": "Enable lychee summary",
+  "cmd.summaryOff": "Disable lychee summary",
   "help.title": "Help",
   "help.close.desc": "Close help",
   "help.press": "Press {shortcut} to see all available actions and commands in any context.",

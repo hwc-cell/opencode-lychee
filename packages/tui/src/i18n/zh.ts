@@ -168,6 +168,9 @@ export const dict: Dict = {
   "about.close.desc": "关闭关于",
 
   // Help dialog
+
+  "cmd.summaryOn": "Enable lychee summary",
+  "cmd.summaryOff": "关闭荔枝小结",
   "help.title": "帮助",
   "help.close.desc": "关闭帮助",
   "help.press": "按 {shortcut} 可在任意上下文中查看所有可用的操作与命令。",

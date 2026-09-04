@@ -8,6 +8,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
 import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
+import { runExitHooks } from "./util/summary"
 import * as Selection from "./util/selection"
 import { createCliRenderer, MouseButton } from "@opentui/core"
 import { RouteProvider, useRoute } from "./context/route"
@@ -362,6 +363,8 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
       process.stderr.write((cliErrorMessage(result.reason) ?? errorFormat(result.reason)) + "\n")
     if (result.epilogue) process.stdout.write(result.epilogue + "\n")
   })
+  // 会话关闭后运行异步钩子(如荔枝小结), 进程保持等待
+  yield* Effect.promise(() => runExitHooks())
 })
 
 function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPluginHost }) {
@@ -816,6 +819,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <DialogHelp />)
         },
         category: "System",
+      },
+      {
+        name: "summary.toggle",
+        title: kv.get("lychee_summary", false) ? t("cmd.summaryOff") : t("cmd.summaryOn"),
+        category: "System",
+        run: () => {
+          kv.set("lychee_summary", !kv.get("lychee_summary", false))
+          dialog.clear()
+        },
       },
       {
         name: "app.about",

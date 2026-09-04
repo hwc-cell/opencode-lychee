@@ -71,6 +71,7 @@ import { DialogExportOptions } from "../../ui/dialog-export-options"
 import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { sessionEpilogue } from "../../util/presentation"
+import { addExitHook, removeExitHook, generateSessionSummary } from "../../util/summary"
 import { setPreLayoutSiblingMargin } from "../../util/layout"
 import { useTuiConfig } from "../../config"
 import { useClipboard } from "../../context/clipboard"
@@ -203,6 +204,35 @@ export function Session() {
   createEffect(() => {
     const title = Locale.truncate(session()?.title ?? "", 50)
     setEpilogue(sessionEpilogue({ title, sessionID: session()?.id }))
+  })
+
+  // 荔枝小结: 退出 TUI 时自动用当前 AI 总结会话 (可 /summary 开关)
+  createEffect(() => {
+    const current = session()
+    if (!current) return
+    const sessionID = current.id
+    const hook = async () => {
+      if (!kv.get("lychee_summary", false)) return
+      const latest = sync.data.message[sessionID] ?? []
+      if (latest.length === 0) return
+      process.stderr.write("\n⏳ 荔枝小结生成中…\n")
+      try {
+        const file = await generateSessionSummary({
+          sdk,
+          directory: current.directory,
+          workspaceID: current.workspaceID,
+          title: current.title,
+          sessionID,
+          messages: latest,
+        })
+        if (file) process.stderr.write(`🍈 荔枝小结已保存: ${file}\n`)
+        else process.stderr.write("⚠️ 荔枝小结生成失败(未获得总结)\n")
+      } catch (error) {
+        process.stderr.write(`⚠️ 荔枝小结生成失败: ${errorMessage(error)}\n`)
+      }
+    }
+    addExitHook(hook)
+    onCleanup(() => removeExitHook(hook))
   })
   onCleanup(() => setEpilogue())
   const children = createMemo(() => {
