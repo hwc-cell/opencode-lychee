@@ -826,7 +826,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: kv.get("autolychee", false) ? t("cmd.autolycheeOff") : t("cmd.autolycheeOn"),
         category: "System",
         slashName: "autolychee",
-        slashAliases: ["openlychee"],
         run: () => {
           kv.set("autolychee", !kv.get("autolychee", false))
           dialog.clear()

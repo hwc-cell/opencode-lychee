@@ -28,6 +28,7 @@
 - 🍈 **Lychee branding** — a true-color lychee icon rendered in the terminal, plus a pixel wordmark.
 - ℹ️ **`/about` command** — find out where this project came from and who built it.
 - 🍈 **Lychee Summary** — when a session closes, the current AI automatically writes a Chinese summary card into `.opencode/reports/` (toggle with `/summary`).
+- 💸 **Auto bookkeeping** — session costs are recorded into [Lychee Ledger](https://lycheeledger.cn) automatically (`/autolychee` to toggle; save the API key with `/ledger-key`).
 - 🚀 **Quick launch** — type `OpenCode-Lychee` (or `lychee`) in your terminal to start.
 
 Everything else — the session engine, plugin system, tool registry, model compatibility — comes straight from upstream OpenCode and stays in sync with it.
