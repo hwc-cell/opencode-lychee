@@ -9,6 +9,7 @@ import { ClipboardProvider, useClipboard } from "./context/clipboard"
 import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
 import { runExitHooks } from "./util/summary"
+import { ledgerValidateKey, setLedgerKey } from "./util/ledger"
 import * as Selection from "./util/selection"
 import { createCliRenderer, MouseButton } from "@opentui/core"
 import { RouteProvider, useRoute } from "./context/route"
@@ -819,6 +820,38 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <DialogHelp />)
         },
         category: "System",
+      },
+      {
+        name: "autolychee.toggle",
+        title: kv.get("autolychee", false) ? t("cmd.autolycheeOff") : t("cmd.autolycheeOn"),
+        category: "System",
+        slashName: "autolychee",
+        run: () => {
+          kv.set("autolychee", !kv.get("autolychee", false))
+          dialog.clear()
+        },
+      },
+      {
+        name: "ledger.key.set",
+        title: t("cmd.ledgerKey"),
+        category: "System",
+        slashName: "ledger-key",
+        run: async () => {
+          const content = await clipboard.read?.()
+          const text = content?.mime === "text/plain" ? content.data : undefined
+          const key = text?.trim()
+          if (!key) {
+            toast.show({ message: t("ledger.keyEmpty"), variant: "warning" })
+            return
+          }
+          if (await ledgerValidateKey(key)) {
+            setLedgerKey(key)
+            toast.show({ message: t("ledger.keySaved"), variant: "success" })
+          } else {
+            toast.show({ message: t("ledger.keyInvalid"), variant: "error" })
+          }
+          dialog.clear()
+        },
       },
       {
         name: "summary.toggle",

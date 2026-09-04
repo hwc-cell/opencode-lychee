@@ -171,6 +171,12 @@ export const dict: Dict = {
 
   "cmd.summaryOn": "Enable lychee summary",
   "cmd.summaryOff": "Disable lychee summary",
+  "cmd.autolycheeOn": "Enable auto bookkeeping",
+  "cmd.autolycheeOff": "Disable auto bookkeeping",
+  "cmd.ledgerKey": "Set ledger API key (from clipboard)",
+  "ledger.keyEmpty": "Clipboard is empty. Copy the API key first.",
+  "ledger.keySaved": "Ledger API key saved ✓",
+  "ledger.keyInvalid": "API key is invalid or expired. Generate a new one in ledger settings.",
   "help.title": "Help",
   "help.close.desc": "Close help",
   "help.press": "Press {shortcut} to see all available actions and commands in any context.",

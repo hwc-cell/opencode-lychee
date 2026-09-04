@@ -171,6 +171,12 @@ export const dict: Dict = {
 
   "cmd.summaryOn": "Enable lychee summary",
   "cmd.summaryOff": "关闭荔枝小结",
+  "cmd.autolycheeOn": "开启自动记账",
+  "cmd.autolycheeOff": "关闭自动记账",
+  "cmd.ledgerKey": "从剪贴板设置账本 Key",
+  "ledger.keyEmpty": "剪贴板为空, 请先复制 API Key",
+  "ledger.keySaved": "账本 API Key 已保存 ✓",
+  "ledger.keyInvalid": "API Key 无效或已失效, 请在账本设置中重新生成",
   "help.title": "帮助",
   "help.close.desc": "关闭帮助",
   "help.press": "按 {shortcut} 可在任意上下文中查看所有可用的操作与命令。",
