@@ -39,16 +39,46 @@ export const VoiceCommand: CommandModule = {
   describe: "语音输入(按住左 Command 说话, 松开自动转写填入输入框)",
   builder: (y: Argv) =>
     y
-      .positional("action", { choices: ["install", "start", "stop", "status", "test"], demandOption: true, describe: "操作" })
+      .positional("action", {
+        choices: ["install", "authorize", "start", "stop", "status", "test"],
+        demandOption: true,
+        describe: "操作",
+      })
       .option("model", { choices: ["tiny", "base", "small"], default: "base", describe: "whisper 模型大小(自动下载)" }),
   handler: async (args) => {
     const action = (args as unknown as { action: string }).action
     if (action === "install") return handleInstall((args as unknown as { model: string }).model)
+    if (action === "authorize") return handleAuthorize()
     if (action === "start") return handleStart()
     if (action === "stop") return handleStop()
     if (action === "status") return handleStatus()
     if (action === "test") return handleTest()
   },
+}
+
+// 一键授权: 打开设置并轮询检测, 授权成功自动启动
+async function handleAuthorize() {
+  if (!existsSync(BIN)) {
+    UI.println("❌ 未安装, 先运行: lychee voice install")
+    return
+  }
+  // 重新签名, 保证 TCC 记录匹配的是当前二进制
+  spawnSync("codesign", ["--force", "--sign", "-", BIN], { stdio: "ignore" })
+  UI.println("· 已打开「辅助功能」设置页")
+  UI.println("⚠️ 如果列表里已有 lychee-dictate: 先点 - 删除!(旧的已失效, 直接勾选没用)")
+  UI.println("然后点 + 添加 ~/.local/bin/lychee-dictate, 勾选开关")
+  UI.println("· 每 2 秒检测一次, 授权成功后自动启动…")
+  spawnSync("open", ["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"], { stdio: "ignore" })
+  for (let i = 0; i < 90; i++) {
+    await sleep(2000)
+    const check = spawnSync(BIN, ["--check"], { stdio: "ignore" })
+    if (check.status === 0) {
+      UI.println("✅ 授权成功!")
+      return handleStart()
+    }
+    if (i % 5 === 4) UI.println(`…还在等待授权 (${Math.round((i + 1) * 2)}s)`)
+  }
+  UI.println("❌ 等待超时。请确认设置里开关是开的; 若仍然不行, 重启电脑后重试: lychee voice authorize")
 }
 
 function cmd(cmdline: string, args: string[]) {

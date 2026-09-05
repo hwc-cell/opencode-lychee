@@ -179,6 +179,10 @@ func runEventTap() {
 // MARK: - main
 
 let recorder = Recorder()
+// 探针模式: lychee voice authorize 用来轮询授权状态 (已授权退出码 0)
+if CommandLine.arguments.contains("--check") {
+  exit(AXIsProcessTrusted() ? 0 : 1)
+}
 if checkTrusted() {
   runEventTap()
 }
