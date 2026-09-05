@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 // 结构化接口(避免依赖生成的 client 内部类型; TUI 的 sdk.client 满足此形状)
@@ -111,6 +111,16 @@ export async function generateSessionSummary(args: {
 }): Promise<string | undefined> {
   const transcript = buildTranscript(args)
 
+  // 会话续接: 已有小结时, 让 AI 追加"新增进展"章节, 不覆盖旧内容
+  let previous = ""
+  const reportDir = join(args.directory, ".opencode", "reports")
+  const file = join(reportDir, `${markdownSafe(args.title)}-${args.sessionID.slice(-6)}.md`)
+  try {
+    previous = await readFile(file, "utf8")
+  } catch {
+    // 首次生成, 无旧小结
+  }
+
   const created = await args.sdk.client.session.create({
     directory: args.directory,
     workspace: args.workspaceID,
@@ -125,10 +135,15 @@ export async function generateSessionSummary(args: {
     parts: [
       {
         type: "text",
-        text:
-          "请用中文总结下面这段 AI 编码会话。输出 Markdown, 结构包括: 一、本次会话做了什么(要点列表); " +
-          "二、主要结论/产出; 三、后续建议。不要超出会话内容编造。\n\n" +
-          transcript,
+        text: previous
+          ? "这是一次会话续接(之前已有小结, 见下方【上次小结】)。请用中文总结本次续接期间的" +
+            "新增进展(与上次相比的增量), 输出 Markdown, 结构包括: 一、续接期间做了什么(要点列表); " +
+            "二、新的结论/产出; 三、继续建议。不要重复上次内容, 不要超出会话内容编造。\n\n" +
+            `【上次小结】\n${previous.slice(0, 6000)}\n\n` +
+            `【本次会话完整内容】\n${transcript}`
+          : "请用中文总结下面这段 AI 编码会话。输出 Markdown, 结构包括: 一、本次会话做了什么(要点列表); " +
+            "二、主要结论/产出; 三、后续建议。不要超出会话内容编造。\n\n" +
+            transcript,
       },
     ],
   })
@@ -136,10 +151,16 @@ export async function generateSessionSummary(args: {
   const reply = await pollReply(args.sdk, summarySessionID, args.directory)
   if (!reply) return undefined
 
-  const reportDir = join(args.directory, ".opencode", "reports")
   await mkdir(reportDir, { recursive: true })
-  const file = join(reportDir, `${markdownSafe(args.title)}-${args.sessionID.slice(-6)}.md`)
-  const content = `# 🍈 荔枝小结\n\n> 来源会话: ${args.title} (${args.sessionID})\n> 生成于: ${new Date().toISOString()}\n\n${reply}`
-  await writeFile(file, content)
+
+  if (previous) {
+    // 剥离 AI 回复自带的首行标题, 避免章节重复
+    const body = reply.replace(/^#+ .{0,40}\n+/u, "")
+    const content = `${previous}\n\n---\n\n## 🍈 续接小结\n\n> 续接于: ${new Date().toISOString()}\n\n${body}`
+    await writeFile(file, content)
+  } else {
+    const content = `# 🍈 荔枝小结\n\n> 来源会话: ${args.title} (${args.sessionID})\n> 生成于: ${new Date().toISOString()}\n\n${reply}`
+    await writeFile(file, content)
+  }
   return file
 }
