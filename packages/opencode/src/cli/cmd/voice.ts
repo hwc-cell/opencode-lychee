@@ -107,10 +107,12 @@ async function handleInstall(model: string) {
     UI.println("❌ 编译失败(需要 Xcode Command Line Tools: xcode-select --install)")
     return
   }
+  // macOS TCC(辅助功能)要求二进制有代码签名, 否则授权勾选后也不生效
+  spawnSync("codesign", ["--force", "--sign", "-", BIN], { stdio: "ignore" })
   UI.println(`✅ lychee-dictate: ${BIN}`)
   UI.println("")
   UI.println("📌 使用:")
-  UI.println("· 首次需授权: 系统设置 > 隐私与安全 > 辅助功能, 勾选 lychee-dictate(启动时会自动打开该设置页)")
+  UI.println("· 授权: 系统设置 > 隐私与安全 > 辅助功能, 勾选 lychee-dictate(若列表里有旧条目, 先点 - 移除再点 + 重新添加)")
   UI.println("· 在 TUI 输入框按住左 Command 说话, 松开自动转写填入")
   UI.println("")
   // 装完自动启动
