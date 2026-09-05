@@ -43,6 +43,8 @@ async function lastAssistantText(sdk: BridgeClient, sessionID: string, dir: stri
   return undefined
 }
 
+const processing = new Set<string>()
+
 export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const state = readState()
   const cred = state.credential
@@ -83,6 +85,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
     for (const msg of resp.msgs ?? []) {
       if (msg.message_type !== 1) continue // 只处理用户消息
       const text = msg.item_list?.find((item) => item.type === 1)?.text_item?.text
+      if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
       if (!text || !msg.from_user_id || !msg.context_token) continue
       await handleMessage({ opts, sdk, token: cred.token, baseUrl: cred.baseUrl, accountId: cred.accountId, msg, text })
     }
@@ -122,6 +125,12 @@ async function handleMessage(args: {
     writeState(state)
   }
 
+  if (processing.has(userKey)) {
+    await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "⏳ 上一条消息还在处理中, 完成后再回复你~" })
+    return
+  }
+  processing.add(userKey)
+  opts.log(`🤖 正在处理 ${msg.from_user_id}: ${text.slice(0, 20)}…`)
   await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
   try {
     const promptRes = await sdk.client.session.prompt({
@@ -132,11 +141,14 @@ async function handleMessage(args: {
     if ((promptRes as { error?: unknown }).error) throw new Error("prompt 失败")
     const reply = await lastAssistantText(sdk, sessionID, opts.dir)
     if (!reply) {
-      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "⚠️ 未获得回复, 请稍后再试。" })
+      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "😅 没有拿到回复, 请稍后再试一次吧~" })
     } else {
-      for (const chunk of chunkText(reply)) {
-        await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: chunk })
+      const chunks = chunkText(reply)
+      for (let i = 0; i < chunks.length; i++) {
+        const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length}) ` : ""
+        await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: prefix + chunks[i] })
       }
+      opts.log(`✅ 已回复 ${msg.from_user_id} (${reply.length} 字, ${chunks.length} 段)`)
     }
   } catch (error) {
     opts.log(`处理失败: ${error instanceof Error ? error.message : error}`)
@@ -145,9 +157,10 @@ async function handleMessage(args: {
       baseUrl,
       toUserId: msg.from_user_id!,
       contextToken: msg.context_token!,
-      text: `⚠️ 处理失败: ${error instanceof Error ? error.message : String(error)}`,
+      text: "😅 哎呀, 处理出错了, 请稍后再试~",
     })
   } finally {
+    processing.delete(userKey)
     await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 2 })
   }
 }

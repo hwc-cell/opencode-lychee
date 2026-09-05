@@ -40,6 +40,10 @@ const LoginCommand: CommandModule = {
     state.cursor = ""
     writeState(state)
     UI.println(`🎉 登录成功: ${cred.botId}`)
+    UI.println("")
+    UI.println("接下来:")
+    UI.println("  → 在另一个终端运行: OpenCode-Lychee weixin run")
+    UI.println("  → 然后直接在微信里给这个 Bot 发消息即可对话")
   },
 }
 
@@ -48,7 +52,7 @@ const RunCommand: CommandModule = {
   describe: "启动微信 Bot 桥(长轮询收发消息)",
   builder: (yargs: Argv) =>
     yargs
-      .option("dir", { type: "string", default: process.cwd(), describe: "AI 工作目录" })
+      .option("dir", { type: "string", describe: "AI 工作目录(默认记住上次使用的)" })
       .option("server", { type: "string", describe: "OpenCode 服务器地址(默认自动启动)" }),
   handler: async (argv) => {
     const state = readState()
@@ -56,6 +60,10 @@ const RunCommand: CommandModule = {
       console.error("未登录, 请先运行: lychee weixin login")
       process.exit(1)
     }
+    const dir = String(argv.dir ?? state.workDir ?? process.cwd())
+    state.workDir = dir
+    writeState(state)
+    console.log(`🤖 AI 工作目录: ${dir}`)
     let serverUrl: string
     const provided = (argv.server as string | undefined) ?? process.env.OPENCODE_SERVER_URL
     if (provided) {
@@ -69,7 +77,7 @@ const RunCommand: CommandModule = {
     const { runWeixinBridge } = await import("@opencode-ai/bridge")
     await runWeixinBridge({
       serverUrl,
-      dir: String(argv.dir),
+      dir,
       log: (msg) => console.log(msg),
     })
   },
@@ -95,7 +103,16 @@ export const WeixinCommand: CommandModule = {
   command: "weixin",
   describe: "微信 Bot 接入(扫码登录 / 消息桥)",
   builder: (yargs: Argv) => {
-    return yargs.command(LoginCommand).command(RunCommand).command(StatusCommand).demandCommand()
+    return yargs.command(LoginCommand).command(RunCommand).command(StatusCommand)
   },
-  handler: () => undefined,
+  handler: () => {
+    const state = readState()
+    if (state.credential) {
+      console.log(`已登录: ${state.credential.accountId}`)
+      console.log("下一步: OpenCode-Lychee weixin run 启动消息桥")
+    } else {
+      console.log("未登录微信 Bot")
+      console.log("用法: OpenCode-Lychee weixin login | run | status")
+    }
+  },
 }

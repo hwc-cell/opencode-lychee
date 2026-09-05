@@ -22,6 +22,8 @@ export type WeixinState = {
   sessions?: Record<string, string>
   // (accountId#userId) -> 最近 context_token
   contexts?: Record<string, string>
+  // 上次使用的 AI 工作目录
+  workDir?: string
 }
 
 export function readState(): WeixinState {
