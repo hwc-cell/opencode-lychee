@@ -10,8 +10,9 @@ import { t } from "./i18n"
 export type BotSdk = {
   v2: {
     session: {
-      create(parameters?: { id?: string; agent?: string; location?: { directory?: string; workspace?: string } }): Promise<unknown>
+      create(parameters?: { id?: string; agent?: string; role?: string; model?: { id: string; providerID: string; variant?: string }; location?: { directory?: string; workspace?: string } }): Promise<unknown>
       prompt(parameters: { sessionID: string; id?: string; prompt?: { text: string }; delivery?: "steer" | "queue" }): Promise<unknown>
+      switchModel(parameters: { sessionID: string; model: { id: string; providerID: string; variant?: string } }): Promise<unknown>
       wait(parameters: { sessionID: string }): Promise<unknown>
       interrupt(parameters: { sessionID: string }): Promise<unknown>
       messages(parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" }): Promise<unknown>
@@ -23,6 +24,7 @@ export type DeliverArgs = {
   sdk: BotSdk
   sessionID: string
   text: string
+  model?: { id: string; providerID: string }
   reply: (text: string) => Promise<void>
   notify?: (text: string) => Promise<void>
   stream?: (text: string) => Promise<void>
@@ -214,6 +216,10 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
 
   const state: RunState = { running: true, info: t("thinking"), abortedByUser: false, streamed: "", pending: "" }
   runState.set(sessionID, state)
+  // 钉死模型: session 级 model 不持久, 每次处理前切一次(失败不阻塞, 只用默认)
+  if (args.model) {
+    await v2.switchModel({ sessionID, model: args.model }).catch(() => {})
+  }
   log(`🤖 开始处理 (${sessionID}): ${text.slice(0, 20)}…`)
   await notify(t("started"))
   try {

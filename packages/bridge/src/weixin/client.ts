@@ -127,6 +127,32 @@ export type WeixinMessage = {
   item_list?: Array<{ type?: number; text_item?: { text?: string } }>
 }
 
+/** 刷新 context_token(iLink 的 context_token ~90-160s 过期, 发消息前应刷新, 失败返回原值) */
+export async function refreshContextToken(opts: {
+  token: string
+  baseUrl: string
+  userId: string
+  contextToken: string
+}): Promise<string> {
+  try {
+    const res = await fetch(`${opts.baseUrl}/ilink/bot/getconfig`, {
+      method: "POST",
+      headers: baseHeaders(opts.token),
+      body: JSON.stringify({
+        ilink_user_id: opts.userId,
+        context_token: opts.contextToken,
+        base_info: baseInfo(),
+      }),
+    })
+    if (!res.ok) return opts.contextToken
+    const json = (await res.json()) as { context_token?: string; ret?: number }
+    if (json.ret !== undefined && json.ret !== 0) return opts.contextToken
+    return json.context_token || opts.contextToken
+  } catch {
+    return opts.contextToken
+  }
+}
+
 export async function getUpdates(opts: {
   token: string
   baseUrl: string
@@ -143,13 +169,17 @@ export async function getUpdates(opts: {
     }),
     signal: opts.signal,
   })
+  if (!res.ok) throw new Error(`getupdates 失败: HTTP ${res.status}`)
   const json = (await res.json()) as {
     ret?: number
+    errcode?: number
     msgs?: WeixinMessage[]
     get_updates_buf?: string
     longpolling_timeout_ms?: number
   }
-  return { ret: json.ret ?? -1, msgs: json.msgs ?? [], get_updates_buf: json.get_updates_buf, longpolling_timeout_ms: json.longpolling_timeout_ms }
+  // 成功响应不带 ret/errcode 字段(实测), 缺失视为 0
+  const ret = json.ret ?? json.errcode ?? 0
+  return { ret, msgs: json.msgs ?? [], get_updates_buf: json.get_updates_buf, longpolling_timeout_ms: json.longpolling_timeout_ms }
 }
 
 export async function sendText(opts: {
