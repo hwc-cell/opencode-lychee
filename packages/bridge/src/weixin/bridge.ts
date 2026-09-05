@@ -1,6 +1,6 @@
 import { chunkText, getUpdates, sendText, sendTyping, type WeixinMessage } from "./client"
 import { readState, writeState } from "./state"
-import { installAutoStart, isAutoStartInstalled, removeAutoStart } from "./daemon"
+import { handleChatCommand } from "../commands"
 
 export type BridgeOptions = {
   serverUrl: string
@@ -127,24 +127,18 @@ async function handleMessage(args: {
     writeState(state)
   }
 
-  // 聊天命令(仅扫码登录账号可用)
-  const command = text.trim().toLowerCase()
-  const owner = msg.from_user_id === ownerUserId
-  if (command === "/autostart" || command === "/autostop") {
-    if (!owner) {
-      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "🔒 只有扫码登录的账号才能操作哦" })
-      return
-    }
-    if (command === "/autostart") {
-      const result = isAutoStartInstalled()
-        ? { ok: true, message: "后台常驻已是开启状态(重启无影响)" }
-        : installAutoStart(state.workDir ?? opts.dir)
-      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}` })
-    } else {
-      const result = removeAutoStart()
-      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}` })
-    }
-    opts.log(`聊天命令 ${command} 执行 (${owner ? "owner" : "非 owner 已拒绝"})`)
+  // 聊天指令(通道无关核心, 仅 owner 可操作后台常驻)
+  if (
+    await handleChatCommand({
+      channel: "weixin",
+      text,
+      fromUserId: msg.from_user_id!,
+      ownerUserId,
+      workDir: state.workDir ?? opts.dir,
+      reply: (replyText) => sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: replyText }),
+      log: (m) => opts.log(m),
+    })
+  ) {
     return
   }
 

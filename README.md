@@ -30,6 +30,7 @@
 - 🍈 **荔枝小结** —— 会话关闭时自动用你当前的 AI 生成中文总结卡片,保存到 `.opencode/reports/`(`/summary` 开关)
 - 💸 **自动记账** —— 会话结束自动把本次 AI 成本记进[荔枝记账](https://lycheeledger.cn)(`/autolychee` 开关,密钥用 `/ledger-key` 保存)
 - 🚀 **快捷启动** —— 终端输入 `OpenCode-Lychee`(或 `lychee`)即可打开
+- 💬 **聊天桥** —— 把微信等聊天软件接入荔枝 AI(`lychee weixin login/run`);聊天指令 `/autostart`、`/autostop`、`/halp` 是**通道通用**的核心能力,任何新聊天平台适配器接入即自动获得(见 `packages/bridge/README.md`)
 
 其余一切——会话引擎、插件系统、工具注册表、模型兼容性——全部继承自上游 OpenCode,并保持同步。
 
