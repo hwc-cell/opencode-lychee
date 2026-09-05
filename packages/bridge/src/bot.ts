@@ -34,7 +34,8 @@ const MODEL_TIMEOUT_MS = Number(process.env.LYCHEE_MODEL_TIMEOUT_MS ?? 600_000)
 // 运行中提醒间隔(默认 5 分钟); 可用 LYCHEE_WORK_REMINDER_MS 覆盖
 const WORK_REMINDER_MS = Number(process.env.LYCHEE_WORK_REMINDER_MS ?? 300_000)
 // 流式转发的最小发文字数: 每轮轮询(2s)攒够就发一条增量, 用户可实时看到模型打字
-const MIN_STREAM_LEN = 4
+// 微信等无"编辑消息"能力的渠道只能分片: 4 字最实时, 调大(如 60)则消息更整、更少刷屏
+const MIN_STREAM_LEN = Number(process.env.LYCHEE_STREAM_MIN_CHARS ?? 4)
 const MAX_ATTEMPTS = 3
 
 type RunState = {
