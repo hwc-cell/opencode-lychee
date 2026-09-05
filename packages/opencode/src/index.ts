@@ -29,6 +29,7 @@ import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
+import { WeixinCommand } from "./cli/cmd/weixin"
 import { Heap } from "./cli/heap"
 import { d } from "./cli/i18n"
 
@@ -102,6 +103,7 @@ const cli = yargs(args)
   .command(PrCommand)
   .command(SessionCommand)
   .command(PluginCommand)
+  .command(WeixinCommand)
   .command(DbCommand)
   .fail((msg, err) => {
     if (
