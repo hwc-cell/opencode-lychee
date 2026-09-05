@@ -1,6 +1,6 @@
 import type { Argv, CommandModule } from "yargs"
 import { UI } from "../ui"
-import { chunkText, getQr, loginUntilConfirmed, sendText } from "@opencode-ai/bridge"
+import { chunkText, loginUntilConfirmed, sendText } from "@opencode-ai/bridge"
 import { readState, writeState, type WeixinState } from "@opencode-ai/bridge"
 
 const LoginCommand: CommandModule = {
@@ -8,15 +8,15 @@ const LoginCommand: CommandModule = {
   describe: "扫码登录微信 Bot",
   handler: async () => {
     let lastStageLabel = ""
-    const { qrcode_img_content } = await getQr()
-    UI.print("📱 用微信扫码登录(或打开):")
-    UI.println(qrcode_img_content)
-    UI.println("")
-    // 二维码直接渲染在终端(两字符宽一个像素)
     const { qrTerminal } = await import("@opencode-ai/bridge")
-    const art = await qrTerminal(qrcode_img_content)
-    UI.println(art)
-    UI.println("等待扫码确认…")
+    const showQr = async (qr: { qrcode_img_content: string }) => {
+      UI.print("📱 用微信扫码登录(或打开):")
+      UI.println(qr.qrcode_img_content)
+      UI.println("")
+      const art = await qrTerminal(qr.qrcode_img_content)
+      UI.println(art)
+      UI.println("等待扫码确认…")
+    }
     UI.println("")
     UI.println("⚠️ 免责声明:")
     UI.println("· 本功能基于腾讯微信 iLink Bot(ClawBot)官方接口, 实际行为以腾讯官方为准;")
@@ -26,6 +26,7 @@ const LoginCommand: CommandModule = {
     UI.println("· 本项目与腾讯 / 微信官方无任何关联。")
 
     const cred = await loginUntilConfirmed({
+      onQr: (qr) => void showQr(qr),
       onStage: (stage) => {
         // 二维码轮询是 ~30s 长轮询, 只在阶段变化时提示, 避免刷屏
         const label =

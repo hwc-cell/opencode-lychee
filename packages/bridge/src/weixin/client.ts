@@ -67,13 +67,16 @@ export async function pollQr(qrcode: string, baseUrl = DEFAULT_BASE, signal?: Ab
 /** 长轮询扫码状态直到 confirmed / expired; onStage 用于打印进度 */
 export async function loginUntilConfirmed(opts: {
   onStage?: (stage: QrStage) => void
+  onQr?: (qr: { qrcode: string; qrcode_img_content: string }) => void
   signal?: AbortSignal
 }): Promise<{ token: string; botId: string; userId: string; baseUrl: string }> {
-  const { qrcode } = await getQr()
+  let qr = await getQr()
+  opts.onQr?.(qr)
   let baseUrl = DEFAULT_BASE
+  let refreshCount = 0
   for (;;) {
     try {
-      const stage = await pollQr(qrcode, baseUrl, opts.signal)
+      const stage = await pollQr(qr.qrcode, baseUrl, opts.signal)
       if (stage.status === "confirmed") {
         return {
           token: stage.bot_token,
@@ -82,7 +85,16 @@ export async function loginUntilConfirmed(opts: {
           baseUrl: stage.baseurl ?? DEFAULT_BASE,
         }
       }
-      if (stage.status === "expired") throw new Error("二维码已过期, 请重跑 login")
+      if (stage.status === "expired") {
+        // 二维码 150s 过期: 自动换新码继续等(最多 3 次)
+        refreshCount += 1
+        if (refreshCount > 3) throw new Error("二维码连续过期, 请重新运行 lychee weixin login")
+        qr = await getQr()
+        baseUrl = DEFAULT_BASE
+        opts.onQr?.(qr)
+        opts.onStage?.({ status: "wait" })
+        continue
+      }
       if (stage.status === "scaned_but_redirect" && stage.redirect_host) {
         const host = stage.redirect_host.includes("://") ? stage.redirect_host : `https://${stage.redirect_host}`
         if (host !== baseUrl) {
