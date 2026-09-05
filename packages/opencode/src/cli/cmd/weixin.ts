@@ -16,6 +16,13 @@ const LoginCommand: CommandModule = {
     const art = await qrTerminal(qrcode_img_content)
     UI.println(art)
     UI.println("等待扫码确认…")
+    UI.println("")
+    UI.println("⚠️ 免责声明:")
+    UI.println("· 本功能基于腾讯微信 iLink Bot(ClawBot)官方接口, 实际行为以腾讯官方为准;")
+    UI.println("· 扫码即授权 Bot 收发消息, 请仅使用你自己有权使用的微信账号;")
+    UI.println("· 登录凭证保存在 ~/.local/state/opencode/weixin.json, 请勿泄露给他人;")
+    UI.println("· 微信平台策略可能变化, 账号受限 / 功能失效等风险请自行承担;")
+    UI.println("· 本项目与腾讯 / 微信官方无任何关联。")
 
     const cred = await loginUntilConfirmed({
       onStage: (stage) => {
