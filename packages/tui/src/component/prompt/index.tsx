@@ -58,6 +58,7 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { useVoiceDictation, voiceToolInstalled } from "../../util/voice"
 
 registerOpencodeSpinner()
 
@@ -174,6 +175,16 @@ export function Prompt(props: PromptProps) {
   const { theme, syntax } = useTheme()
   const kv = useKV()
   const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
+  // 语音输入: lychee-dictate 转写完成后自动填入输入框
+  const { voice } = useVoiceDictation((text) => {
+    if (!input) return
+    const prefix = input.plainText && !input.plainText.endsWith(" ") && !input.plainText.endsWith("\n") ? " " : ""
+    input.insertText(prefix + text)
+    input.cursorOffset = input.plainText.length
+    setStore("prompt", "input", input.plainText)
+  })
+  const showVoice = createMemo(() => voiceToolInstalled())
+  const voiceStatus = createMemo(() => voice())
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
   const fileContextEnabled = createMemo(() => kv.get("file_context_enabled", true))
@@ -1395,6 +1406,24 @@ export function Prompt(props: PromptProps) {
             flexGrow={1}
             width="100%"
           >
+            <Show when={showVoice()}>
+              <box flexDirection="row" paddingBottom={1}>
+                <Switch>
+                  <Match when={voiceStatus()?.state === "recording"}>
+                    <text>{`🎙️ ${t("prompt.voiceRecording")} ${t("prompt.voiceReleaseHint")}`}</text>
+                  </Match>
+                  <Match when={voiceStatus()?.state === "error"}>
+                    <text fg={theme.error}>{`🎤 ${voiceStatus()?.message ?? ""}`}</text>
+                  </Match>
+                  <Match when={voiceStatus()?.state === "done"}>
+                    <text fg={theme.primary}>{`🎤 ${t("prompt.voiceFilled")}`}</text>
+                  </Match>
+                  <Match when={true}>
+                    <text fg={theme.textMuted}>{`🎤 ${t("prompt.voiceHoldHint")}`}</text>
+                  </Match>
+                </Switch>
+              </box>
+            </Show>
             <textarea
               width="100%"
               placeholder={placeholderText()}

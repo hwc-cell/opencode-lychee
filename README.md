@@ -32,6 +32,7 @@
 - 🚀 **快捷启动** —— 终端输入 `OpenCode-Lychee`(或 `lychee`)即可打开
 - 💬 **聊天桥** —— 把微信等聊天软件接入荔枝 AI(`lychee weixin login/run`);聊天指令 `/autostart`、`/autostop`、`/halp` 是**通道通用**的核心能力,任何新聊天平台适配器接入即自动获得(见 `packages/bridge/README.md`)
 - ⚡️ **超时重试 & 打断通知** —— 模型超时自动重试并提示「⚡️模型超时,已尝试X/3次」;新消息打断时提示「⚡️已打断,当前运行:…」;运行中每 5 分钟提醒「⏱️ 依然在工作,已工作X分钟」;桥内所有文案按 `OPENCODE_LANG` 中英切换
+- 🎙️ **按住 ⌘ 说话** —— macOS 语音输入:按住左 Command 说话,松开自动转写并填入 CLI 输入框(全局监听,本地 Whisper 转写,离线免费:`lychee voice install`,详见 `packages/tui/lychee-dictate.swift`)
 
 其余一切——会话引擎、插件系统、工具注册表、模型兼容性——全部继承自上游 OpenCode,并保持同步。
 
