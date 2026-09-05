@@ -54,17 +54,15 @@ ${args}
 `
 }
 
-export function installAutoStart(channel: string, dir: string): { ok: boolean; message: string } {
+type TFunc = (key: string) => string
+
+export function installAutoStart(channel: string, dir: string, t: TFunc): { ok: boolean; message: string } {
   if (process.platform !== "darwin") {
-    return { ok: false, message: "后台常驻目前仅支持 macOS(其他系统请自行配置 systemd)" }
+    return { ok: false, message: t("cmdNotFound") }
   }
   const launcher = join(homedir(), ".local", "bin", "OpenCode-Lychee")
   if (!existsSync(launcher)) {
-    return {
-      ok: false,
-      message:
-        "未找到启动器, 请先执行: cp packages/opencode/lychee.sh ~/.local/bin/OpenCode-Lychee && chmod +x ~/.local/bin/OpenCode-Lychee",
-    }
+    return { ok: false, message: t("cmdMissingLauncher") }
   }
   const program = [launcher, channel, "run", "--dir", dir]
   const path = plistPath(channel)
@@ -74,18 +72,18 @@ export function installAutoStart(channel: string, dir: string): { ok: boolean; m
   spawnSync("launchctl", ["unload", "-w", path], { stdio: "ignore" })
   const res = spawnSync("launchctl", ["load", "-w", path], { stdio: "ignore" })
   if (res.status !== 0) {
-    return { ok: false, message: "launchctl 加载失败, 请手动检查 plist 文件" }
+    return { ok: false, message: t("cmdLaunchFailed") }
   }
-  return { ok: true, message: "已开启后台常驻(开机自启 + 崩溃自动重启)" }
+  return { ok: true, message: t("cmdOn") }
 }
 
-export function removeAutoStart(channel: string): { ok: boolean; message: string } {
+export function removeAutoStart(channel: string, t: TFunc): { ok: boolean; message: string } {
   if (process.platform !== "darwin") {
-    return { ok: true, message: "非 macOS, 无 launchd 配置可移除" }
+    return { ok: true, message: t("cmdNotDarwin") }
   }
   const path = plistPath(channel)
-  if (!existsSync(path)) return { ok: true, message: "未开启过后台常驻" }
+  if (!existsSync(path)) return { ok: true, message: t("cmdNotInstalled") }
   spawnSync("launchctl", ["unload", "-w", path], { stdio: "ignore" })
   rmSync(path, { force: true })
-  return { ok: true, message: "已关闭后台常驻" }
+  return { ok: true, message: t("cmdOff") }
 }

@@ -1,5 +1,7 @@
 export * from "./qr"
+export * from "./i18n"
 export * from "./commands"
+export * from "./bot"
 export * from "./weixin/client"
 export * from "./weixin/state"
 export * from "./weixin/daemon"

@@ -1,6 +1,9 @@
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { chunkText, getUpdates, sendText, sendTyping, type WeixinMessage } from "./client"
 import { readState, writeState } from "./state"
 import { handleChatCommand } from "../commands"
+import { deliverMessage, enqueue, interruptCurrent, isQueued, type BotSdk } from "../bot"
+import { t } from "../i18n"
 
 export type BridgeOptions = {
   serverUrl: string
@@ -8,49 +11,18 @@ export type BridgeOptions = {
   log: (msg: string) => string | void
 }
 
-type BridgeClient = {
-  client: {
-    session: {
-      create(input: { directory?: string }): Promise<{ error?: unknown; data?: { id?: string } }>
-      prompt(input: { sessionID: string; directory?: string; parts: Array<{ type: "text"; text: string }> }): Promise<unknown>
-      messages(input: { sessionID: string; directory?: string }): Promise<{
-        data?: Array<{ info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> }>
-      }>
-    }
-  }
-}
+// OpencodeClient 的 .client 受保护, 通过结构接口桥接(SDK v2 均在运行时存在)。
+// 更新 SDK 生成代码后, BotSdk 里新增的方法需同步加入。
+const makeClient = (serverUrl: string): BotSdk =>
+  ({ client: createOpencodeClient({ baseUrl: serverUrl }) }) as unknown as BotSdk
 
-async function makeClient(serverUrl: string): Promise<BridgeClient> {
-  const { createOpencodeClient } = await import("@opencode-ai/sdk/v2")
-  const client = createOpencodeClient({ baseUrl: serverUrl }) as unknown as { session: unknown }
-  return { client } as unknown as BridgeClient
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-async function lastAssistantText(sdk: BridgeClient, sessionID: string, dir: string): Promise<string | undefined> {
-  const res = await sdk.client.session.messages({ sessionID, directory: dir })
-  const rows = (res.data ?? []) as Array<{ info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> }>
-  for (const row of [...rows].reverse()) {
-    if (row.info?.role !== "assistant") continue
-    const text = (row.parts ?? [])
-      .map((p) => (p.type === "text" ? p.text : undefined))
-      .filter((t): t is string => Boolean(t))
-      .join("\n\n")
-    if (text) return text
-  }
-  return undefined
-}
-
-const processing = new Set<string>()
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const state = readState()
   const cred = state.credential
   if (!cred) throw new Error("未登录: 请先运行 lychee weixin login")
-  const sdk = await makeClient(opts.serverUrl)
+  const sdk = makeClient(opts.serverUrl)
   let running = true
   process.on("SIGINT", () => {
     running = false
@@ -96,7 +68,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
 
 async function handleMessage(args: {
   opts: BridgeOptions
-  sdk: BridgeClient
+  sdk: BotSdk
   token: string
   baseUrl: string
   accountId: string
@@ -113,18 +85,25 @@ async function handleMessage(args: {
   state.contexts[userKey] = msg.context_token!
   writeState(state)
 
+  const reply = (replyText: string) =>
+    sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: replyText })
+
   // 会话映射: 每个微信用户一个 opencode 会话
   state.sessions = state.sessions ?? {}
   let sessionID = state.sessions[userKey]
   if (!sessionID) {
-    const res = await sdk.client.session.create({ directory: opts.dir })
-    if (!res.data?.id) {
-      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "⚠️ 创建会话失败, 请稍后再试。" })
+    const res = (await sdk.v2.session.create({ location: { directory: opts.dir } })) as {
+      data?: { data?: { id?: string } }
+    }
+    const id = res.data?.data?.id
+    if (!id) {
+      await reply(t("noSession"))
       return
     }
-    sessionID = res.data.id
+    sessionID = id
     state.sessions[userKey] = sessionID
     writeState(state)
+    await reply(t("created"))
   }
 
   // 聊天指令(通道无关核心, 仅 owner 可操作后台常驻)
@@ -135,49 +114,37 @@ async function handleMessage(args: {
       fromUserId: msg.from_user_id!,
       ownerUserId,
       workDir: state.workDir ?? opts.dir,
-      reply: (replyText) => sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: replyText }),
+      reply,
       log: (m) => opts.log(m),
     })
   ) {
     return
   }
 
-  if (processing.has(userKey)) {
-    await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "⏳ 上一条消息还在处理中, 完成后再回复你~" })
-    return
+  // 新消息打断正在运行的旧任务(通知由核心发出)
+  if (isQueued(userKey)) {
+    await interruptCurrent({ sdk, sessionID, reply, log: (m) => opts.log(m) })
   }
-  processing.add(userKey)
-  opts.log(`🤖 正在处理 ${msg.from_user_id}: ${text.slice(0, 20)}…`)
-  await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
-  try {
-    const promptRes = await sdk.client.session.prompt({
-      sessionID,
-      directory: opts.dir,
-      parts: [{ type: "text", text }],
-    })
-    if ((promptRes as { error?: unknown }).error) throw new Error("prompt 失败")
-    const reply = await lastAssistantText(sdk, sessionID, opts.dir)
-    if (!reply) {
-      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "😅 没有拿到回复, 请稍后再试一次吧~" })
-    } else {
-      const chunks = chunkText(reply)
-      for (let i = 0; i < chunks.length; i++) {
-        const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length}) ` : ""
-        await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: prefix + chunks[i] })
-      }
-      opts.log(`✅ 已回复 ${msg.from_user_id} (${reply.length} 字, ${chunks.length} 段)`)
+
+  // 同一用户串行处理: 新消息在旧任务结束后执行
+  await enqueue(userKey, async () => {
+    await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
+    try {
+      await deliverMessage({
+        sdk,
+        sessionID,
+        text,
+        reply: async (replyText) => {
+          const chunks = chunkText(replyText)
+          for (let i = 0; i < chunks.length; i++) {
+            const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length}) ` : ""
+            await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: prefix + chunks[i] })
+          }
+        },
+        log: (m) => opts.log(m),
+      })
+    } finally {
+      await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 2 })
     }
-  } catch (error) {
-    opts.log(`处理失败: ${error instanceof Error ? error.message : error}`)
-    await sendText({
-      token,
-      baseUrl,
-      toUserId: msg.from_user_id!,
-      contextToken: msg.context_token!,
-      text: "😅 哎呀, 处理出错了, 请稍后再试~",
-    })
-  } finally {
-    processing.delete(userKey)
-    await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 2 })
-  }
+  })
 }
