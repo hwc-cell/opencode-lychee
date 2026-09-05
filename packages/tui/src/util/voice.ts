@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -14,10 +15,22 @@ export type VoiceStatus = {
 }
 
 export const VOICE_STATUS_PATH = join(homedir(), ".local", "state", "opencode", "voice.json")
+export const VOICE_BIN = join(homedir(), ".local", "bin", "lychee-dictate")
 
 export function voiceToolInstalled(): boolean {
   if (process.platform !== "darwin") return false
-  return existsSync(join(homedir(), ".local", "bin", "lychee-dictate"))
+  return existsSync(VOICE_BIN)
+}
+
+// 零权限模式(Ctrl+R): 开始/停止录音, 转写完成自动填入输入框
+export function toggleVoiceRecording(current: VoiceStatus | undefined) {
+  if (!voiceToolInstalled()) return
+  if (current?.state === "recording") {
+    spawn(VOICE_BIN, ["--stop"], { stdio: "ignore" })
+  } else {
+    const proc = spawn(VOICE_BIN, ["--record"], { detached: true, stdio: "ignore" })
+    proc.unref()
+  }
 }
 
 export function useVoiceDictation(onResult: (text: string) => void) {

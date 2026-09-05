@@ -288,11 +288,11 @@ export const dict: Dict = {
   "cmd.updateFailed": "Update Failed",
   "prompt.runCommand": "Run a command... \"{example}\"",
   "prompt.askAnything": "Ask anything... \"{example}\"",
-  "prompt.voiceHoldHint": "Hold ⌘ to talk, release to transcribe",
+  "prompt.voiceHoldHint": "Hold ⌘ to talk (release to transcribe); no permission? Use Ctrl+R to start/stop",
   "prompt.voiceRecording": "Recording, release ⌘ to end",
   "prompt.voiceReleaseHint": "(transcribes on release)",
   "prompt.voiceFilled": "Transcribed and inserted",
-  "prompt.voiceStatusBar": "⌘ to talk",
+  "prompt.voiceStatusBar": "⌘ to talk / Ctrl+R",
   "prompt.voiceNeedAuth": "needs authorization",
 }
 

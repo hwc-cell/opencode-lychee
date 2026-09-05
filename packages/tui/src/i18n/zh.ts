@@ -288,11 +288,11 @@ export const dict: Dict = {
   "cmd.updateFailed": "更新失败",
   "prompt.runCommand": "运行命令... \"{example}\"",
   "prompt.askAnything": "随便问点什么... \"{example}\"",
-  "prompt.voiceHoldHint": "按住 ⌘ 说话, 松开自动转写",
+  "prompt.voiceHoldHint": "按住 ⌘ 说话(松开自动转写); 没有授权时按 Ctrl+R 开始/停止录音",
   "prompt.voiceRecording": "正在录音, 松开 ⌘ 结束",
   "prompt.voiceReleaseHint": "(松开自动转写)",
   "prompt.voiceFilled": "转写完成, 已填入",
-  "prompt.voiceStatusBar": "⌘ 说话",
+  "prompt.voiceStatusBar": "⌘ 说话 / Ctrl+R",
   "prompt.voiceNeedAuth": "需要授权",
 }
 

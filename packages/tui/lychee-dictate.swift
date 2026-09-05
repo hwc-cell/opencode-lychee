@@ -57,10 +57,13 @@ final class Recorder: NSObject, AVAudioRecorderDelegate {
     }
   }
 
-  func stopAndTranscribe() {
-    guard let recorder else { return }
-    recorder.stop()
+  func stopRaw() {
+    recorder?.stop()
     self.recorder = nil
+  }
+
+  func stopAndTranscribe() {
+    stopRaw()
     // 稍等文件落盘再转写
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
       transcribe()
@@ -176,12 +179,45 @@ func runEventTap() {
   CFRunLoopRun()
 }
 
+// MARK: - 零权限模式: --record / --stop (由 TUI 快捷键触发的开始/停止录音)
+// 不依赖辅助功能权限: TUI 直接 spawn 子进程, 录音由控制文件协调。
+
+let ctlPath = "\(stateDir)/voice.ctl"
+
+func runRecordMode() {
+  try? FileManager.default.removeItem(atPath: ctlPath)
+  writeState(["state": "recording"])
+  recorder.start()
+  // 等待 TUI 发 --stop(写控制文件)
+  while !FileManager.default.fileExists(atPath: ctlPath) {
+    usleep(200_000)
+  }
+  try? FileManager.default.removeItem(atPath: ctlPath)
+  recorder.stopRaw()
+  usleep(400_000) // 等文件落盘
+  print("🧠 transcribing…")
+  transcribe()
+}
+
+func runStopMode() {
+  try? "stop".write(toFile: ctlPath, atomically: true, encoding: .utf8)
+}
+
 // MARK: - main
 
 let recorder = Recorder()
 // 探针模式: lychee voice authorize 用来轮询授权状态 (已授权退出码 0)
 if CommandLine.arguments.contains("--check") {
   exit(AXIsProcessTrusted() ? 0 : 1)
+}
+// 零权限模式: TUI 快捷键控制
+if CommandLine.arguments.contains("--record") {
+  runRecordMode()
+  exit(0)
+}
+if CommandLine.arguments.contains("--stop") {
+  runStopMode()
+  exit(0)
 }
 if checkTrusted() {
   runEventTap()

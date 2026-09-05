@@ -7,6 +7,7 @@ const LoginCommand: CommandModule = {
   command: "login",
   describe: "扫码登录微信 Bot",
   handler: async () => {
+    let lastStageLabel = ""
     const { qrcode_img_content } = await getQr()
     UI.print("📱 用微信扫码登录(或打开):")
     UI.println(qrcode_img_content)
@@ -26,7 +27,19 @@ const LoginCommand: CommandModule = {
 
     const cred = await loginUntilConfirmed({
       onStage: (stage) => {
-        if (stage.status === "scaned") UI.println("✅ 已扫码, 请在手机上确认…")
+        // 二维码轮询是 ~30s 长轮询, 只在阶段变化时提示, 避免刷屏
+        const label =
+          stage.status === "scaned"
+            ? "✅ 已扫码, 请在手机上确认…"
+            : stage.status === "scaned_but_redirect"
+              ? "✅ 已扫码(握手切换中)…"
+              : stage.status === "wait"
+                ? "📱 等待扫码…"
+                : undefined
+        if (label && label !== lastStageLabel) {
+          UI.println(label)
+          lastStageLabel = label
+        }
       },
     })
     const state: WeixinState = readState()

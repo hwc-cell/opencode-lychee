@@ -2,6 +2,8 @@
 import { randomBytes } from "node:crypto"
 
 const DEFAULT_BASE = "https://ilinkai.weixin.qq.com"
+// iLink 协议版本(2.1.1 编码为 0x00MMNNPP 整数, 服务端按此识别客户端)
+const ILINK_APP_CLIENT_VERSION = 131329
 
 function randomWechatUin(): string {
   const value = randomBytes(4).readUInt32BE(0)
@@ -14,17 +16,20 @@ function baseHeaders(token: string): Record<string, string> {
     AuthorizationType: "ilink_bot_token",
     Authorization: `Bearer ${token}`,
     "X-WECHAT-UIN": randomWechatUin(),
+    "iLink-App-Id": "bot",
+    "iLink-App-ClientVersion": String(ILINK_APP_CLIENT_VERSION),
   }
 }
 
 function baseInfo() {
-  return { channel_version: "1.0.0" }
+  return { channel_version: "2.1.1" }
 }
 
 // ---------- 登录 ----------
 export type QrStage =
   | { status: "wait" }
   | { status: "scaned" }
+  | { status: "scaned_but_redirect"; redirect_host?: string }
   | { status: "expired" }
   | {
       status: "confirmed"
@@ -44,10 +49,16 @@ export async function getQr(): Promise<{ qrcode: string; qrcode_img_content: str
   return { qrcode: json.qrcode, qrcode_img_content: json.qrcode_img_content }
 }
 
-export async function pollQr(qrcode: string, signal?: AbortSignal): Promise<QrStage> {
-  const res = await fetch(`${DEFAULT_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`, {
-    headers: { "iLink-App-ClientVersion": "1", SKRouteTag: "1001" },
-    signal,
+// 接口是 ~30s 长轮询: 45s 超时兜底, 与真机行为对齐
+export async function pollQr(qrcode: string, baseUrl = DEFAULT_BASE, signal?: AbortSignal): Promise<QrStage> {
+  const timeout = AbortSignal.timeout(45_000)
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
+  const res = await fetch(`${baseUrl}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`, {
+    headers: {
+      ...baseHeaders(""),
+      "iLink-App-ClientVersion": String(ILINK_APP_CLIENT_VERSION),
+    },
+    signal: combined,
   })
   if (!res.ok) throw new Error(`轮询二维码失败: HTTP ${res.status}`)
   return (await res.json()) as QrStage
@@ -59,19 +70,34 @@ export async function loginUntilConfirmed(opts: {
   signal?: AbortSignal
 }): Promise<{ token: string; botId: string; userId: string; baseUrl: string }> {
   const { qrcode } = await getQr()
+  let baseUrl = DEFAULT_BASE
   for (;;) {
-    await new Promise((r) => setTimeout(r, 3000))
-    const stage = await pollQr(qrcode, opts.signal)
-    if (stage.status === "confirmed") {
-      return {
-        token: stage.bot_token,
-        botId: stage.ilink_bot_id,
-        userId: stage.ilink_user_id,
-        baseUrl: stage.baseurl ?? DEFAULT_BASE,
+    try {
+      const stage = await pollQr(qrcode, baseUrl, opts.signal)
+      if (stage.status === "confirmed") {
+        return {
+          token: stage.bot_token,
+          botId: stage.ilink_bot_id,
+          userId: stage.ilink_user_id,
+          baseUrl: stage.baseurl ?? DEFAULT_BASE,
+        }
       }
+      if (stage.status === "expired") throw new Error("二维码已过期, 请重跑 login")
+      if (stage.status === "scaned_but_redirect" && stage.redirect_host) {
+        const host = stage.redirect_host.includes("://") ? stage.redirect_host : `https://${stage.redirect_host}`
+        if (host !== baseUrl) {
+          baseUrl = host
+          opts.onStage?.({ status: "wait" })
+        }
+        continue
+      }
+      opts.onStage?.(stage)
+    } catch (error) {
+      if (opts.signal?.aborted) throw error
+      // 轮询超时/网络抖动: 重试(服务端 ~30s 一轮)
+      opts.onStage?.({ status: "wait" } as QrStage)
     }
-    if (stage.status === "expired") throw new Error("二维码已过期, 请重跑 login")
-    opts.onStage?.(stage)
+    await new Promise((r) => setTimeout(r, 1000))
   }
 }
 

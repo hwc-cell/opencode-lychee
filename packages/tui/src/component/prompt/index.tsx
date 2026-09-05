@@ -58,7 +58,7 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
-import { useVoiceDictation, voiceToolInstalled } from "../../util/voice"
+import { useVoiceDictation, voiceToolInstalled, toggleVoiceRecording } from "../../util/voice"
 
 registerOpencodeSpinner()
 
@@ -842,6 +842,22 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: inputTarget() !== undefined && !props.disabled,
       bindings: tuiConfig.keybinds.get("prompt.paste"),
+    }
+  })
+
+  // 语音输入(零权限模式): Ctrl+R 开始/停止录音, 转写结果自动填入(需 lychee voice install)
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled && showVoice(),
+      bindings: [
+        {
+          key: "ctrl+r",
+          desc: "语音输入(开始/停止)",
+          group: "Prompt",
+          cmd: () => toggleVoiceRecording(voice()),
+        },
+      ],
     }
   })
 
