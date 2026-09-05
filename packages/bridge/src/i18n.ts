@@ -12,6 +12,9 @@ const messages: Record<BridgeLang, Record<string, string>> = {
   zh: {
     timeout: "⚡️模型超时,已尝试{n}/3次",
     interrupted: "⚡️已打断,当前运行:{what}",
+    started: "🧠 收到,正在处理…",
+    stillWorking: "⏱️ 依然在工作,已工作{m}分钟{extra}",
+    stillWorkingTool: "(正在运行:{tool})",
     thinking: "思考中…",
     runningTool: "运行工具 {tool}",
     busy: "⏳ 上一条消息还在处理中,完成后再回复你~",
@@ -42,6 +45,9 @@ const messages: Record<BridgeLang, Record<string, string>> = {
   en: {
     timeout: "⚡️ Model timeout, attempt {n}/3",
     interrupted: "⚡️ Interrupted, now running: {what}",
+    started: "🧠 Got it, working on it…",
+    stillWorking: "⏱️ Still working, {m} min in{extra}",
+    stillWorkingTool: " (running: {tool})",
     thinking: "thinking…",
     runningTool: "running tool {tool}",
     busy: "⏳ Still processing your last message. I'll reply once it's done~",

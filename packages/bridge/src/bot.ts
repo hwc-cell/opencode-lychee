@@ -24,16 +24,20 @@ export type DeliverArgs = {
   sessionID: string
   text: string
   reply: (text: string) => Promise<void>
+  notify?: (text: string) => Promise<void>
   log: (msg: string) => void
 }
 
 // 每次尝试的最长等待(看门狗), 超时视为模型超时; 可用 LYCHEE_MODEL_TIMEOUT_MS 覆盖
 const MODEL_TIMEOUT_MS = Number(process.env.LYCHEE_MODEL_TIMEOUT_MS ?? 600_000)
+// 运行中提醒间隔(默认 5 分钟); 可用 LYCHEE_WORK_REMINDER_MS 覆盖
+const WORK_REMINDER_MS = Number(process.env.LYCHEE_WORK_REMINDER_MS ?? 300_000)
 const MAX_ATTEMPTS = 3
 
 type RunState = {
   running: boolean
   info: string
+  tool?: string
   abortedByUser: boolean
 }
 
@@ -104,9 +108,11 @@ async function refreshInfo(v2: V2Session, sessionID: string, state: RunState, lo
     if (!assistant) return
     const runningTool = assistant.content?.find((part) => part.type === "tool" && part.state?.status !== "completed" && part.state?.status !== "error")
     if (runningTool?.name) {
+      state.tool = runningTool.name
       state.info = t("runningTool", { tool: runningTool.name })
       return
     }
+    state.tool = undefined
     const text = assistantText(assistant)
     if (text) {
       const compact = text.replaceAll(/\s+/g, " ").trim().slice(-60)
@@ -117,10 +123,27 @@ async function refreshInfo(v2: V2Session, sessionID: string, state: RunState, lo
   }
 }
 
-// 等待会话变 idle; 每 2s 刷新"当前运行"状态, 看门狗超时返回 "timeout"
-async function waitIdle(v2: V2Session, sessionID: string, state: RunState, log: (msg: string) => void): Promise<"idle" | "timeout"> {
+// 等待会话变 idle; 每 2s 刷新"当前运行"状态并定期发工作提醒, 看门狗超时返回 "timeout"
+async function waitIdle(
+  v2: V2Session,
+  sessionID: string,
+  state: RunState,
+  log: (msg: string) => void,
+  notify: (text: string) => Promise<void>,
+): Promise<"idle" | "timeout"> {
+  const startedAt = Date.now()
+  let lastReminder = startedAt
   const timer = setInterval(() => {
-    void refreshInfo(v2, sessionID, state, log)
+    void (async () => {
+      await refreshInfo(v2, sessionID, state, log)
+      const elapsed = Date.now() - startedAt
+      if (elapsed - (lastReminder - startedAt) >= WORK_REMINDER_MS) {
+        lastReminder = Date.now()
+        const mins = Math.max(1, Math.floor(elapsed / 60_000))
+        await notify(t("stillWorking", { m: mins, extra: state.tool ? t("stillWorkingTool", { tool: state.tool }) : "" }))
+        log(`工作提醒: 已工作约 ${mins} 分钟${state.tool ? ` (${state.tool})` : ""}`)
+      }
+    })().catch(() => {})
   }, 2000)
   void refreshInfo(v2, sessionID, state, log)
   try {
@@ -150,6 +173,7 @@ export async function interruptCurrent(args: { sdk: BotSdk; sessionID: string; r
 
 export async function deliverMessage(args: DeliverArgs): Promise<void> {
   const { sdk, sessionID, text, reply, log } = args
+  const notify = args.notify ?? reply
   const v2 = sdk.v2.session
   // 理论上队列已保证串行; 防御: 若仍处于运行中则先打断
   const prev = runState.get(sessionID)
@@ -162,6 +186,7 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
   const state: RunState = { running: true, info: t("thinking"), abortedByUser: false }
   runState.set(sessionID, state)
   log(`🤖 开始处理 (${sessionID}): ${text.slice(0, 20)}…`)
+  await notify(t("started"))
   try {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       // 每次尝试使用新 id: 失败后复用同 id 会触发 server 的 PromptConflict(exact-retry 只对未失败的输入有效)
@@ -176,7 +201,7 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
       }
       log(`已递交 prompt attempt=${attempt} (${(admitted as { data?: { data?: { id?: string } } })?.data?.data?.id ?? "n/a"})`)
 
-      const outcome = await waitIdle(v2, sessionID, state, log)
+      const outcome = await waitIdle(v2, sessionID, state, log, notify)
       if (state.abortedByUser) {
         log("被用户消息打断, 静默结束(通知已由新任务发出)")
         return
