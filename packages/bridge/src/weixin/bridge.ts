@@ -1,5 +1,6 @@
 import { chunkText, getUpdates, sendText, sendTyping, type WeixinMessage } from "./client"
 import { readState, writeState } from "./state"
+import { installAutoStart, isAutoStartInstalled, removeAutoStart } from "./daemon"
 
 export type BridgeOptions = {
   serverUrl: string
@@ -87,7 +88,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       const text = msg.item_list?.find((item) => item.type === 1)?.text_item?.text
       if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
       if (!text || !msg.from_user_id || !msg.context_token) continue
-      await handleMessage({ opts, sdk, token: cred.token, baseUrl: cred.baseUrl, accountId: cred.accountId, msg, text })
+      await handleMessage({ opts, sdk, token: cred.token, baseUrl: cred.baseUrl, accountId: cred.accountId, ownerUserId: cred.userId, msg, text })
     }
   }
   opts.log("桥已停止")
@@ -99,10 +100,11 @@ async function handleMessage(args: {
   token: string
   baseUrl: string
   accountId: string
+  ownerUserId: string
   msg: WeixinMessage
   text: string
 }) {
-  const { opts, sdk, token, baseUrl, accountId, msg, text } = args
+  const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, text } = args
   const userKey = `${accountId}#${msg.from_user_id}`
   const state = readState()
 
@@ -123,6 +125,27 @@ async function handleMessage(args: {
     sessionID = res.data.id
     state.sessions[userKey] = sessionID
     writeState(state)
+  }
+
+  // 聊天命令(仅扫码登录账号可用)
+  const command = text.trim().toLowerCase()
+  const owner = msg.from_user_id === ownerUserId
+  if (command === "/autostart" || command === "/autostop") {
+    if (!owner) {
+      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: "🔒 只有扫码登录的账号才能操作哦" })
+      return
+    }
+    if (command === "/autostart") {
+      const result = isAutoStartInstalled()
+        ? { ok: true, message: "后台常驻已是开启状态(重启无影响)" }
+        : installAutoStart(state.workDir ?? opts.dir)
+      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}` })
+    } else {
+      const result = removeAutoStart()
+      await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}` })
+    }
+    opts.log(`聊天命令 ${command} 执行 (${owner ? "owner" : "非 owner 已拒绝"})`)
+    return
   }
 
   if (processing.has(userKey)) {
