@@ -292,6 +292,8 @@ export const dict: Dict = {
   "prompt.voiceRecording": "正在录音, 松开 ⌘ 结束",
   "prompt.voiceReleaseHint": "(松开自动转写)",
   "prompt.voiceFilled": "转写完成, 已填入",
+  "prompt.voiceStatusBar": "⌘ 说话",
+  "prompt.voiceNeedAuth": "需要授权",
 }
 
 export type Placeholders = { normal: string[]; shell: string[] }

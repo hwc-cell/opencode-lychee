@@ -292,6 +292,8 @@ export const dict: Dict = {
   "prompt.voiceRecording": "Recording, release ⌘ to end",
   "prompt.voiceReleaseHint": "(transcribes on release)",
   "prompt.voiceFilled": "Transcribed and inserted",
+  "prompt.voiceStatusBar": "⌘ to talk",
+  "prompt.voiceNeedAuth": "needs authorization",
 }
 
 export type Placeholders = { normal: string[]; shell: string[] }

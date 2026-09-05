@@ -26,6 +26,18 @@ export function useVoiceDictation(onResult: (text: string) => void) {
     return { voice }
   }
   let lastDoneTs = 0
+  // TUI 打开时若发现残留的 done(如 TUI 没开时录的), 直接作废, 不插入过时文本
+  try {
+    if (existsSync(VOICE_STATUS_PATH)) {
+      const existing = JSON.parse(readFileSync(VOICE_STATUS_PATH, "utf8")) as VoiceStatus
+      if (existing.state === "done" && existing.ts !== undefined) {
+        lastDoneTs = existing.ts
+        writeFileSync(VOICE_STATUS_PATH, JSON.stringify({ state: "idle", ts: existing.ts }))
+      }
+    }
+  } catch {
+    // 忽略
+  }
   const timer = setInterval(() => {
     try {
       if (!existsSync(VOICE_STATUS_PATH)) return

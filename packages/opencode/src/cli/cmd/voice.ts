@@ -110,9 +110,11 @@ async function handleInstall(model: string) {
   UI.println(`✅ lychee-dictate: ${BIN}`)
   UI.println("")
   UI.println("📌 使用:")
-  UI.println("· 启动: lychee voice start(常驻后台)")
-  UI.println("· 首次需授权: 系统设置 > 隐私与安全 > 辅助功能, 勾选 lychee-dictate")
+  UI.println("· 首次需授权: 系统设置 > 隐私与安全 > 辅助功能, 勾选 lychee-dictate(启动时会自动打开该设置页)")
   UI.println("· 在 TUI 输入框按住左 Command 说话, 松开自动转写填入")
+  UI.println("")
+  // 装完自动启动
+  return handleStart()
 }
 
 async function handleStart() {
@@ -123,7 +125,29 @@ async function handleStart() {
   UI.println("• 启动 lychee-dictate…")
   const proc = spawn(BIN, [], { detached: true, stdio: "ignore" })
   proc.unref()
-  UI.println("✅ 已启动(按左 Command 说话即可; 首次需授权辅助功能)")
+  await sleep(1500)
+  const st = readVoiceStatus()
+  if (st?.state === "error") {
+    UI.println(`⚠️ 启动失败: ${st.message ?? "未知原因"}`)
+    UI.println("· 请到 系统设置 > 隐私与安全 > 辅助功能 勾选 lychee-dictate, 然后重试: lychee voice start")
+    UI.println("· 若列表里没有 lychee-dictate, 点 + 添加: ~/.local/bin/lychee-dictate")
+    return
+  }
+  UI.println("✅ 已启动: 按住左 Command 说话即可(状态栏会显示 🎙️ 录音中)")
+}
+
+function readVoiceStatus() {
+  const statusPath = join(homedir(), ".local", "state", "opencode", "voice.json")
+  if (!existsSync(statusPath)) return undefined
+  try {
+    return JSON.parse(readFileSync(statusPath, "utf8")) as { state: string; text?: string; message?: string; ts?: number }
+  } catch {
+    return undefined
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
 function handleStop() {
@@ -132,16 +156,14 @@ function handleStop() {
 }
 
 function handleStatus() {
-  const statusPath = join(homedir(), ".local", "state", "opencode", "voice.json")
-  if (!existsSync(statusPath)) {
+  const status = readVoiceStatus()
+  if (!status) {
     UI.println("状态: 未运行(无状态文件)")
     return
   }
-  try {
-    const status = JSON.parse(readFileSync(statusPath, "utf8")) as { state: string; text?: string; message?: string }
-    UI.println(`状态: ${status.state}${status.text ? ` — ${status.text}` : ""}${status.message ? ` — ${status.message}` : ""}`)
-  } catch {
-    UI.println("状态: 文件损坏")
+  UI.println(`状态: ${status.state}${status.text ? ` — ${status.text}` : ""}${status.message ? ` — ${status.message}` : ""}`)
+  if (status.state === "error") {
+    UI.println("提示: 运行 lychee voice start 会重新启动并再次尝试打开授权设置")
   }
 }
 

@@ -1413,7 +1413,7 @@ export function Prompt(props: PromptProps) {
                     <text>{`🎙️ ${t("prompt.voiceRecording")} ${t("prompt.voiceReleaseHint")}`}</text>
                   </Match>
                   <Match when={voiceStatus()?.state === "error"}>
-                    <text fg={theme.error}>{`🎤 ${voiceStatus()?.message ?? ""}`}</text>
+                    <text fg={theme.error}>{`🎤 ${t("prompt.voiceNeedAuth")}`}</text>
                   </Match>
                   <Match when={voiceStatus()?.state === "done"}>
                     <text fg={theme.primary}>{`🎤 ${t("prompt.voiceFilled")}`}</text>
@@ -1715,6 +1715,19 @@ export function Prompt(props: PromptProps) {
               <text fg={kv.get("lychee_summary", false) ? theme.success : theme.textMuted}>
                 {kv.get("lychee_summary", false) ? t("summary.statusOn") : t("summary.statusOff")}
               </text>
+              <Show when={showVoice()}>
+                <Switch>
+                  <Match when={voiceStatus()?.state === "recording"}>
+                    <text fg={theme.primary}>{`🎙️ ${t("prompt.voiceRecording")}`}</text>
+                  </Match>
+                  <Match when={voiceStatus()?.state === "error"}>
+                    <text fg={theme.error}>{`🎤 ${t("prompt.voiceNeedAuth")}`}</text>
+                  </Match>
+                  <Match when={true}>
+                    <text fg={theme.textMuted}>{`🎤 ${t("prompt.voiceStatusBar")}`}</text>
+                  </Match>
+                </Switch>
+              </Show>
               <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
                 {(file) => (
                   <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>
