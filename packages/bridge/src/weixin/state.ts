@@ -24,6 +24,8 @@ export type WeixinState = {
   contexts?: Record<string, string>
   // 上次使用的 AI 工作目录
   workDir?: string
+  // (accountId#userId) -> 用户选择的模型(微信 /model 切换)
+  models?: Record<string, { id: string; providerID: string; variant?: string }>
 }
 
 export function readState(): WeixinState {

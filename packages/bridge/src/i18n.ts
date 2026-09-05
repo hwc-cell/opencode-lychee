@@ -26,6 +26,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     // 聊天指令
     cmdHelp: [
       "🤖 可用指令:",
+      "· /model —— 查看可用模型; /model <名称> [强度] 切换",
       "· /autostart —— 开启后台常驻(开机自启, 崩溃重启)",
       "· /autostop —— 关闭后台常驻",
       "· /halp —— 查看本帮助",
@@ -41,6 +42,12 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdNotInstalled: "未开启过后台常驻",
     cmdNotDarwin: "非 macOS, 无 launchd 配置可移除",
     cmdLogPrefix: "后台常驻",
+    cmdModelList: "可用模型(发送 /model <名称> [强度] 切换):",
+    cmdModelEmpty: "😅 当前没有可用模型",
+    cmdModelNotFound: "😅 找不到模型「{name}」, 发送 /model 查看列表",
+    cmdModelVariant: "思考强度:{v}",
+    cmdModelSwitched: "✅ 已切换为 {model}",
+    cmdModelSwitchFailed: "⚠️ 切换 {model} 失败(可能当前不可用)",
   },
   en: {
     timeout: "⚡️ Model timeout, attempt {n}/3",
@@ -58,6 +65,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     created: "🍈 Lychee is ready, just send a message (/halp for commands)",
     cmdHelp: [
       "🤖 Available commands:",
+      "· /model — list models; /model <name> [intensity] to switch",
       "· /autostart — enable background daemon (auto-start on boot, auto-restart)",
       "· /autostop — disable background daemon",
       "· /halp — show this help",
@@ -73,6 +81,12 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdNotInstalled: "Background daemon was never enabled",
     cmdNotDarwin: "Not macOS, nothing to remove",
     cmdLogPrefix: "daemon",
+    cmdModelList: "Available models (/model <name> [intensity] to switch):",
+    cmdModelEmpty: "😅 No models available",
+    cmdModelNotFound: "😅 Model \"{name}\" not found, send /model for the list",
+    cmdModelVariant: "intensity:{v}",
+    cmdModelSwitched: "✅ Switched to {model}",
+    cmdModelSwitchFailed: "⚠️ Failed to switch to {model} (maybe unavailable)",
   },
 }
 

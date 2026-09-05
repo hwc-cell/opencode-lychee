@@ -7,12 +7,25 @@ import { t } from "./i18n"
 //   - 模型超时自动重试(⚡️模型超时,已尝试X/3次), 按语言输出
 //   - 按用户串行排队, 新消息打断旧任务后立即接管
 
+export type BridgeModelInfo = {
+  id: string
+  providerID: string
+  name?: string
+  enabled?: boolean
+  variants?: Array<{ id: string }>
+}
+
+export type BridgeModelRef = { id: string; providerID: string; variant?: string }
+
 export type BotSdk = {
   v2: {
+    model: {
+      list(parameters?: { location?: { directory?: string; workspace?: string } }): Promise<unknown>
+    }
     session: {
       create(parameters?: { id?: string; agent?: string; role?: string; model?: { id: string; providerID: string; variant?: string }; location?: { directory?: string; workspace?: string } }): Promise<unknown>
       prompt(parameters: { sessionID: string; id?: string; prompt?: { text: string }; delivery?: "steer" | "queue" }): Promise<unknown>
-      switchModel(parameters: { sessionID: string; model: { id: string; providerID: string; variant?: string } }): Promise<unknown>
+      switchModel(parameters: { sessionID: string; model: BridgeModelRef }): Promise<unknown>
       wait(parameters: { sessionID: string }): Promise<unknown>
       interrupt(parameters: { sessionID: string }): Promise<unknown>
       messages(parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" }): Promise<unknown>
@@ -24,7 +37,7 @@ export type DeliverArgs = {
   sdk: BotSdk
   sessionID: string
   text: string
-  model?: { id: string; providerID: string }
+  model?: BridgeModelRef
   reply: (text: string) => Promise<void>
   notify?: (text: string) => Promise<void>
   stream?: (text: string) => Promise<void>
