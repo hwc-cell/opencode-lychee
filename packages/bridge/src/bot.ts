@@ -25,6 +25,7 @@ export type DeliverArgs = {
   text: string
   reply: (text: string) => Promise<void>
   notify?: (text: string) => Promise<void>
+  stream?: (text: string) => Promise<void>
   log: (msg: string) => void
 }
 
@@ -32,6 +33,8 @@ export type DeliverArgs = {
 const MODEL_TIMEOUT_MS = Number(process.env.LYCHEE_MODEL_TIMEOUT_MS ?? 600_000)
 // 运行中提醒间隔(默认 5 分钟); 可用 LYCHEE_WORK_REMINDER_MS 覆盖
 const WORK_REMINDER_MS = Number(process.env.LYCHEE_WORK_REMINDER_MS ?? 300_000)
+// 流式转发的最小发文字数: 每轮轮询(2s)攒够就发一条增量, 用户可实时看到模型打字
+const MIN_STREAM_LEN = 4
 const MAX_ATTEMPTS = 3
 
 type RunState = {
@@ -39,6 +42,8 @@ type RunState = {
   info: string
   tool?: string
   abortedByUser: boolean
+  streamed: string
+  pending: string
 }
 
 const runState = new Map<string, RunState>()
@@ -102,40 +107,62 @@ function assistantText(assistant: AssistantMessage): string {
     .join("\n\n")
 }
 
-async function refreshInfo(v2: V2Session, sessionID: string, state: RunState, log: (msg: string) => void) {
+// 原子取出待发缓冲再发送, 避免轮询 tick 与超时/完成路径竞态导致丢字或重复
+async function flushPending(state: RunState, stream: (text: string) => Promise<void>, log: (msg: string) => void) {
+  const chunk = state.pending
+  if (!chunk) return
+  state.pending = ""
+  await stream(chunk)
+  log(`📤 流式已发 (${chunk.length} 字)`)
+}
+
+// 轮询一次: 更新"当前运行"信息 + 流式转发模型已生成的新文本
+async function poll(v2: V2Session, sessionID: string, state: RunState, stream: (text: string) => Promise<void>, log: (msg: string) => void) {
   try {
     const assistant = await lastAssistant(v2, sessionID)
     if (!assistant) return
+    // 运行状态
     const runningTool = assistant.content?.find((part) => part.type === "tool" && part.state?.status !== "completed" && part.state?.status !== "error")
     if (runningTool?.name) {
       state.tool = runningTool.name
       state.info = t("runningTool", { tool: runningTool.name })
-      return
+    } else {
+      state.tool = undefined
+      const text = assistantText(assistant)
+      if (text) {
+        const compact = text.replaceAll(/\s+/g, " ").trim().slice(-60)
+        if (compact) state.info = compact
+      }
     }
-    state.tool = undefined
-    const text = assistantText(assistant)
-    if (text) {
-      const compact = text.replaceAll(/\s+/g, " ").trim().slice(-60)
-      if (compact) state.info = compact
+    // 流式增量: 模型重写(文本变短)时忽略
+    if (assistant.error) return
+    const full = assistantText(assistant)
+    if (full.length < state.streamed.length) return
+    const newPart = full.slice(state.streamed.length)
+    if (newPart) {
+      state.streamed = full
+      state.pending += newPart
     }
+    if (state.pending.length >= MIN_STREAM_LEN) await flushPending(state, stream, log)
   } catch (error) {
-    log(`刷新运行信息失败: ${error instanceof Error ? error.message : error}`)
+    log(`轮询失败: ${error instanceof Error ? error.message : error}`)
   }
 }
 
-// 等待会话变 idle; 每 2s 刷新"当前运行"状态并定期发工作提醒, 看门狗超时返回 "timeout"
+// 等待会话变 idle; 每 2s 轮询(状态 + 流式)并定期发工作提醒, 看门狗超时返回 "timeout"
 async function waitIdle(
   v2: V2Session,
   sessionID: string,
   state: RunState,
   log: (msg: string) => void,
   notify: (text: string) => Promise<void>,
+  stream: (text: string) => Promise<void>,
 ): Promise<"idle" | "timeout"> {
   const startedAt = Date.now()
   let lastReminder = startedAt
   const timer = setInterval(() => {
     void (async () => {
-      await refreshInfo(v2, sessionID, state, log)
+      await poll(v2, sessionID, state, stream, log)
       const elapsed = Date.now() - startedAt
       if (elapsed - (lastReminder - startedAt) >= WORK_REMINDER_MS) {
         lastReminder = Date.now()
@@ -145,7 +172,7 @@ async function waitIdle(
       }
     })().catch(() => {})
   }, 2000)
-  void refreshInfo(v2, sessionID, state, log)
+  void poll(v2, sessionID, state, stream, log)
   try {
     const outcome = await Promise.race([
       v2.wait({ sessionID }).then(() => "idle" as const),
@@ -174,6 +201,7 @@ export async function interruptCurrent(args: { sdk: BotSdk; sessionID: string; r
 export async function deliverMessage(args: DeliverArgs): Promise<void> {
   const { sdk, sessionID, text, reply, log } = args
   const notify = args.notify ?? reply
+  const stream = args.stream ?? reply
   const v2 = sdk.v2.session
   // 理论上队列已保证串行; 防御: 若仍处于运行中则先打断
   const prev = runState.get(sessionID)
@@ -183,7 +211,7 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     await sleep(500)
   }
 
-  const state: RunState = { running: true, info: t("thinking"), abortedByUser: false }
+  const state: RunState = { running: true, info: t("thinking"), abortedByUser: false, streamed: "", pending: "" }
   runState.set(sessionID, state)
   log(`🤖 开始处理 (${sessionID}): ${text.slice(0, 20)}…`)
   await notify(t("started"))
@@ -191,6 +219,9 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       // 每次尝试使用新 id: 失败后复用同 id 会触发 server 的 PromptConflict(exact-retry 只对未失败的输入有效)
       const promptID = `msg_${randomUUID().replaceAll("-", "")}`
+      // 新尝试从头流式, 旧尝试已发出的文本不回收
+      state.streamed = ""
+      state.pending = ""
       let admitted
       try {
         admitted = await v2.prompt({ sessionID, id: promptID, prompt: { text } })
@@ -201,7 +232,7 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
       }
       log(`已递交 prompt attempt=${attempt} (${(admitted as { data?: { data?: { id?: string } } })?.data?.data?.id ?? "n/a"})`)
 
-      const outcome = await waitIdle(v2, sessionID, state, log, notify)
+      const outcome = await waitIdle(v2, sessionID, state, log, notify, stream)
       if (state.abortedByUser) {
         log("被用户消息打断, 静默结束(通知已由新任务发出)")
         return
@@ -210,6 +241,8 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
         log(`看门狗超时 (${MODEL_TIMEOUT_MS / 1000}s), 打断并重试`)
         state.abortedByUser = true // 防止后续 wait 结果误判为"用户打断"
         await safeInterrupt(v2, sessionID)
+        // 先把本轮已生成的文本冲给用户, 再提示超时
+        await flushPending(state, stream, log)
         await reply(t("timeout", { n: attempt }))
         await sleep(1500)
         // 下轮重新 prompt 前先把标志清掉
@@ -219,10 +252,13 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
 
       const assistant = await lastAssistant(v2, sessionID)
       if (assistant && !assistant.error) {
-        const replyText = assistantText(assistant)
-        if (replyText) {
-          await reply(replyText)
-          log(`✅ 已回复 (${replyText.length} 字)`)
+        const finalText = assistantText(assistant)
+        if (finalText) {
+          // 先把未冲掉的流式缓冲发出去, 剩余部分(若有)用最终回复补齐
+          await flushPending(state, stream, log)
+          const remaining = finalText.slice(state.streamed.length)
+          if (remaining) await reply(remaining)
+          log(`✅ 已回复 (${finalText.length} 字, 流式 ${Math.min(state.streamed.length, finalText.length)} 字)`)
           return
         }
         await reply(t("noReply"))
