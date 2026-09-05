@@ -1,6 +1,7 @@
 import type { Argv, CommandModule } from "yargs"
 import { UI } from "../ui"
-import { chunkText, loginUntilConfirmed, sendText } from "@opencode-ai/bridge"
+import { chunkText, installAutoStart, loginUntilConfirmed, removeAutoStart, sendText } from "@opencode-ai/bridge"
+import { t as bridgeT } from "@opencode-ai/bridge"
 import { readState, writeState, type WeixinState } from "@opencode-ai/bridge"
 
 const LoginCommand: CommandModule = {
@@ -56,7 +57,8 @@ const LoginCommand: CommandModule = {
     UI.println(`🎉 登录成功: ${cred.botId}`)
     UI.println("")
     UI.println("接下来:")
-    UI.println("  → 在另一个终端运行: OpenCode-Lychee weixin run")
+    UI.println("  → 一键常驻(推荐, 开机自启+崩溃重启): OpenCode-Lychee weixin autostart")
+    UI.println("  → 或临时运行: OpenCode-Lychee weixin run")
     UI.println("  → 然后直接在微信里给这个 Bot 发消息即可对话")
   },
 }
@@ -113,11 +115,38 @@ const StatusCommand: CommandModule = {
   },
 }
 
+const AutostartCommand: CommandModule = {
+  command: "autostart",
+  describe: "安装后台常驻(launchd: 开机自启 + 崩溃重启)",
+  handler: () => {
+    const state = readState()
+    if (!state.credential) {
+      console.log("❌ 未登录, 先运行: lychee weixin login")
+      return
+    }
+    const dir = state.workDir ?? process.cwd()
+    state.workDir = dir
+    writeState(state)
+    const result = installAutoStart("weixin", dir, bridgeT)
+    console.log(`${result.ok ? "✅" : "⚠️"} ${result.message}`)
+    if (result.ok) console.log("· 停止常驻: lychee weixin autostop")
+  },
+}
+
+const AutostopCommand: CommandModule = {
+  command: "autostop",
+  describe: "移除后台常驻",
+  handler: () => {
+    const result = removeAutoStart("weixin", bridgeT)
+    console.log(`${result.ok ? "✅" : "⚠️"} ${result.message}`)
+  },
+}
+
 export const WeixinCommand: CommandModule = {
   command: "weixin",
   describe: "微信 Bot 接入(扫码登录 / 消息桥)",
   builder: (yargs: Argv) => {
-    return yargs.command(LoginCommand).command(RunCommand).command(StatusCommand)
+    return yargs.command(LoginCommand).command(RunCommand).command(StatusCommand).command(AutostartCommand).command(AutostopCommand)
   },
   handler: () => {
     const state = readState()
