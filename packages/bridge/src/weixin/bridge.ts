@@ -112,7 +112,7 @@ async function handleMessage(args: {
   state.models = state.models ?? {}
   const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split("/")
   const defaultModel = defaultID ? { id: defaultID, providerID: defaultProvider } : undefined
-  const model = state.models[userKey] ?? defaultModel
+  const model = state.models[userKey] ?? state.model ?? defaultModel
 
   // 会话映射: 每个微信用户一个 opencode 会话
   state.sessions = state.sessions ?? {}
@@ -166,6 +166,12 @@ async function handleMessage(args: {
       },
     })
   ) {
+    return
+  }
+
+  // 未配置模型的用户: 引导配置(指令如 /model 已在上方放行)
+  if (!state.models[userKey] && !state.model) {
+    await reply(t("needModelConfig"))
     return
   }
 

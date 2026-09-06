@@ -26,6 +26,8 @@ export type WeixinState = {
   workDir?: string
   // (accountId#userId) -> 用户选择的模型(微信 /model 切换)
   models?: Record<string, { id: string; providerID: string; variant?: string }>
+  // 默认模型(lychee weixin configure 配置; 未配置时微信发消息会被引导配置)
+  model?: { id: string; providerID: string; variant?: string }
 }
 
 export function readState(): WeixinState {

@@ -48,6 +48,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdModelVariant: "思考强度:{v}",
     cmdModelSwitched: "✅ 已切换为 {model}",
     cmdModelSwitchFailed: "⚠️ 切换 {model} 失败(可能当前不可用)",
+    needModelConfig: "⚠️ 还没配置模型哦: 请运行 lychee weixin configure(或直接发 /model 选择)",
   },
   en: {
     timeout: "⚡️ Model timeout, attempt {n}/3",
@@ -87,6 +88,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdModelVariant: "intensity:{v}",
     cmdModelSwitched: "✅ Switched to {model}",
     cmdModelSwitchFailed: "⚠️ Failed to switch to {model} (maybe unavailable)",
+    needModelConfig: "⚠️ No model configured yet: run lychee weixin configure (or send /model)",
   },
 }
 

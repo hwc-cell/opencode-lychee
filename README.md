@@ -30,9 +30,22 @@
 - 🍈 **荔枝小结** —— 会话关闭时自动用你当前的 AI 生成中文总结卡片,保存到 `.opencode/reports/`(`/summary` 开关)
 - 💸 **自动记账** —— 会话结束自动把本次 AI 成本记进[荔枝记账](https://lycheeledger.cn)(`/autolychee` 开关,密钥用 `/ledger-key` 保存)
 - 🚀 **快捷启动** —— 终端输入 `OpenCode-Lychee`(或 `lychee`)即可打开
-- 💬 **聊天桥** —— 把微信等聊天软件接入荔枝 AI(`lychee weixin login/run`);聊天指令 `/autostart`、`/autostop`、`/halp` 是**通道通用**的核心能力,任何新聊天平台适配器接入即自动获得(见 `packages/bridge/README.md`)
+- 💬 **聊天桥** —— 把微信接入荔枝 AI,扫码登录后自动进入**模型配置界面**,配好模型才可用;聊天指令 `/model`(查看/切换模型+思考强度)、`/autostart`、`/autostop`、`/halp` 是**通道通用**的核心能力,任何新聊天平台适配器接入即自动获得(见 `packages/bridge/README.md`)
 - ⚡️ **超时重试 & 打断通知** —— 模型超时自动重试并提示「⚡️模型超时,已尝试X/3次」;新消息打断时提示「⚡️已打断,当前运行:…」;运行中每 5 分钟提醒「⏱️ 依然在工作,已工作X分钟」;桥内所有文案按 `OPENCODE_LANG` 中英切换
+- 🔑 **密钥模型自动收录** —— v2 模型目录自动读入 `auth.json` 中已配置密钥的提供商(如 DeepSeek V4),`/model` 列表与切模型即可使用,密钥不进代码/配置
 - 🎙️ **按住 ⌘ 说话** —— macOS 语音输入:按住左 Command 说话,松开自动转写并填入 CLI 输入框(全局监听,本地 Whisper 转写,离线免费:`lychee voice install`,详见 `packages/tui/lychee-dictate.swift`)
+
+## 微信接入三步
+
+```bash
+lychee weixin login       # ① 扫码登录(二维码自动续期; 登录成功直接进模型配置)
+lychee weixin configure   # ② (可选)重新配置默认模型与思考强度
+lychee weixin autostart   # ③ 装成系统常驻: 开机自启+崩溃重启, 再也不用管
+```
+
+- 首次登录会**强制配置默认模型**(否则微信发消息会被引导配置);以后可在微信里随时发送 `/model` 查看/切换模型与思考强度(如 `/model deepseek v4 pro max`)
+- `lychee weixin run` 临时前台运行;`lychee weixin autostop` 移除常驻
+- 微信里支持流式"打字"回复、`⏱️ 5 分钟工作提醒`、`⚡️ 超时自动重试/打断通知`,文案随 `OPENCODE_LANG` 中英切换
 
 其余一切——会话引擎、插件系统、工具注册表、模型兼容性——全部继承自上游 OpenCode,并保持同步。
 

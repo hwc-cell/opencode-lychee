@@ -22,7 +22,7 @@ export type ProviderRecord = {
 type AuthEntry = { type?: string; key?: string }
 type AuthFile = Record<string, AuthEntry>
 
-const AUTH_PROFILES: Record<string, { baseURL: string; models: Array<{ id: string; name: string; variants?: string[] }> }> = {
+export const AUTH_PROFILES: Record<string, { baseURL: string; models: Array<{ id: string; name: string; variants?: string[] }> }> = {
   deepseek: {
     baseURL: "https://api.deepseek.com/v1",
     models: [
