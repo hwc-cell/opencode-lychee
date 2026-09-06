@@ -2,7 +2,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { chunkText, getUpdates, refreshContextToken, sendText, sendTyping, type WeixinMessage } from "./client"
 import { readState, writeState } from "./state"
 import { handleChatCommand } from "../commands"
-import { deliverMessage, enqueue, interruptCurrent, isQueued, type BotSdk } from "../bot"
+import { deliverMessage, enqueue, interruptCurrent, isQueued, type BotSdk, type BridgeModelInfo } from "../bot"
 import { t } from "../i18n"
 
 export type BridgeOptions = {
@@ -108,9 +108,11 @@ async function handleMessage(args: {
     }
   }
 
-  // 桥会话显式指定模型: 默认 muse 免费模型(可用 LYCHEE_MODEL=provider/model 覆盖)
-  const [modelProvider, modelID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split("/")
-  const model = modelID ? { id: modelID, providerID: modelProvider } : undefined
+  // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
+  state.models = state.models ?? {}
+  const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split("/")
+  const defaultModel = defaultID ? { id: defaultID, providerID: defaultProvider } : undefined
+  const model = state.models[userKey] ?? defaultModel
 
   // 会话映射: 每个微信用户一个 opencode 会话
   state.sessions = state.sessions ?? {}
@@ -143,6 +145,25 @@ async function handleMessage(args: {
       workDir: state.workDir ?? opts.dir,
       reply,
       log: (m) => opts.log(m),
+      models: {
+        list: async () => {
+          const res = (await sdk.v2.model.list({ location: { directory: opts.dir } })) as {
+            data?: { data?: BridgeModelInfo[] }
+          }
+          return res.data?.data ?? []
+        },
+        switchModel: async (next) => {
+          try {
+            await sdk.v2.session.switchModel({ sessionID, model: next })
+            state.models![userKey] = next
+            writeState(state)
+            return true
+          } catch (error) {
+            opts.log(`/model 切换失败: ${error instanceof Error ? error.message : error}`)
+            return false
+          }
+        },
+      },
     })
   ) {
     return
