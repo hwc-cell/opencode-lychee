@@ -3,6 +3,9 @@ export * as Catalog from "./catalog"
 import { makeLocationNode } from "./effect/app-node"
 import { Array, Context, Effect, Layer, Option, Order, pipe, Schema } from "effect"
 import { Catalog } from "@opencode-ai/schema/catalog"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import { Path } from "./global"
 import { ModelV2 } from "./model"
 import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
@@ -13,6 +16,78 @@ import { Integration } from "./integration"
 export type ProviderRecord = {
   provider: ProviderV2.MutableInfo
   models: Map<ModelV2.ID, ModelV2.MutableInfo>
+}
+
+// ---- 荔枝增强: auth.json 中已配置密钥(api key)的开放平台 -> 注入 v2 目录 ----
+type AuthEntry = { type?: string; key?: string }
+type AuthFile = Record<string, AuthEntry>
+
+const AUTH_PROFILES: Record<string, { baseURL: string; models: Array<{ id: string; name: string; variants?: string[] }> }> = {
+  deepseek: {
+    baseURL: "https://api.deepseek.com/v1",
+    models: [
+      { id: "deepseek-chat", name: "DeepSeek Chat" },
+      { id: "deepseek-reasoner", name: "DeepSeek Reasoner" },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", variants: ["low", "medium", "high", "max"] },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", variants: ["low", "medium", "high", "max"] },
+    ],
+  },
+}
+
+function readAuthFile(): AuthFile {
+  const file = join(Path.data, "auth.json")
+  if (!existsSync(file)) return {}
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as AuthFile
+  } catch {
+    return {}
+  }
+}
+
+// 从 auth.json 生成 auth 平台的 provider 记录(密钥随 provider api.settings 携带)
+function authProviderRecords(): ProviderRecord[] {
+  const records: ProviderRecord[] = []
+  const auth = readAuthFile()
+  for (const [providerID, entry] of Object.entries(auth)) {
+    const profile = entry?.type === "api" && entry.key ? AUTH_PROFILES[providerID] : undefined
+    if (!profile) continue
+    const provider = ProviderV2.Info.make({
+      id: ProviderV2.ID.make(providerID),
+      name: providerID,
+      api: {
+        type: "aisdk",
+        package: "@ai-sdk/openai-compatible",
+        url: profile.baseURL,
+        settings: { apiKey: entry.key! },
+      },
+      request: { headers: {}, body: {} },
+    })
+    const models = new Map<ModelV2.ID, ModelV2.MutableInfo>()
+    for (const m of profile.models) {
+      const variants = (m.variants ?? []).map((vid) => ({
+        id: ModelV2.VariantID.make(vid),
+        headers: {},
+        body: { reasoningEffort: vid },
+      }))
+      const model = ModelV2.Info.make({
+        id: ModelV2.ID.make(m.id),
+        providerID: ProviderV2.ID.make(providerID),
+        name: m.name,
+        api: { type: "aisdk", package: "@ai-sdk/openai-compatible", id: ModelV2.ID.make(m.id) },
+        capabilities: { tools: true, input: ["text"], output: ["text"] },
+        request: { headers: {}, body: {} },
+        variants,
+        time: { released: Date.now() },
+        cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+        status: "active",
+        enabled: true,
+        limit: { context: 128_000, output: 16_000 },
+      })
+      models.set(ModelV2.ID.make(m.id), model as ModelV2.MutableInfo)
+    }
+    records.push({ provider, models })
+  }
+  return records
 }
 
 export type DefaultModel = { providerID: ProviderV2.ID; modelID: ModelV2.ID }
@@ -174,11 +249,18 @@ const layer = Layer.effect(
 
       provider: {
         get: Effect.fn("CatalogV2.provider.get")(function* (providerID) {
-          return state.get().providers.get(providerID)?.provider
+          const record = state.get().providers.get(providerID)
+          if (record) return record.provider
+          // 荔枝: auth.json 密钥平台回退
+          return authProviderRecords().find((item) => item.provider.id === providerID)?.provider
         }),
 
         all: Effect.fn("CatalogV2.provider.all")(function* () {
-          return Array.fromIterable(state.get().providers.values()).map((record) => record.provider)
+          const records = authProviderRecords()
+          const known = new Set(state.get().providers.keys())
+          return Array.fromIterable(state.get().providers.values())
+            .map((record) => record.provider)
+            .concat(records.filter((record) => !known.has(record.provider.id)).map((record) => record.provider))
         }),
 
         available: Effect.fn("CatalogV2.provider.available")(function* () {
@@ -192,23 +274,36 @@ const layer = Layer.effect(
       model: {
         get: Effect.fn("CatalogV2.model.get")(function* (providerID, modelID) {
           const record = state.get().providers.get(providerID)
-          if (!record) return
+          if (!record) {
+            // 荔枝: auth.json 密钥平台回退
+            const auth = authProviderRecords().find((item) => item.provider.id === providerID)
+            const model = auth?.models.get(modelID)
+            return model && auth ? projectModel(model, auth.provider) : undefined
+          }
           const model = record.models.get(modelID)
           return model && projectModel(model, record.provider)
         }),
 
         all: Effect.fn("CatalogV2.model.all")(function* () {
-          return pipe(
+          const authModels = authProviderRecords().flatMap((record) =>
+            Array.fromIterable(record.models.values()).map((model) => projectModel(model, record.provider)),
+          )
+          const authIDs = new Set(authProviderRecords().map((record) => record.provider.id))
+          return authModels.concat(
+            pipe(
             Array.fromIterable(state.get().providers.values()),
             Array.flatMap((record) => {
               return Array.fromIterable(record.models.values()).map((model) => projectModel(model, record.provider))
             }),
             Array.sortWith((item) => item.time.released, Order.flip(Order.Number)),
+          ).filter((item) => !authIDs.has(item.providerID)),
           )
         }),
 
         available: Effect.fn("CatalogV2.model.available")(function* () {
           const providers = new Set((yield* result.provider.available()).map((provider) => provider.id))
+          // 荔枝: auth.json 密钥平台的模型视为可用
+          for (const record of authProviderRecords()) providers.add(record.provider.id)
           return (yield* result.model.all()).filter((model) => providers.has(model.providerID) && model.enabled)
         }),
 
