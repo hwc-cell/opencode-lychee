@@ -1,5 +1,6 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
-import { chunkText, getUpdates, refreshContextToken, sendText, sendTyping, type WeixinMessage } from "./client"
+import { randomUUID } from "node:crypto"
+import { chunkText, getUpdates, sendText, sendTyping, type WeixinMessage } from "./client"
 import { readState, writeState } from "./state"
 import { handleChatCommand } from "../commands"
 import { deliverMessage, enqueue, interruptCurrent, isQueued, type BotSdk, type BridgeModelInfo } from "../bot"
@@ -24,11 +25,16 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   if (!cred) throw new Error("未登录: 请先运行 lychee weixin login")
   const sdk = makeClient(opts.serverUrl)
   let running = true
-  process.on("SIGINT", () => {
+  const abort = new AbortController()
+  const stop = () => {
     running = false
-  })
+    abort.abort()
+  }
+  process.on("SIGINT", stop)
+  process.on("SIGTERM", stop)
 
   let cursor = state.cursor ?? ""
+  let timeout = 45_000
   // getupdates 可能重复推送, 按消息 id 去重
   const processed = new Set<string>()
   opts.log(`微信 Bot 已启动 (${cred.accountId}), 等待消息… (Ctrl+C 停止)`)
@@ -36,8 +42,9 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   while (running) {
     let resp
     try {
-      resp = await getUpdates({ token: cred.token, baseUrl: cred.baseUrl, cursor })
+      resp = await getUpdates({ token: cred.token, baseUrl: cred.baseUrl, cursor, timeoutMs: timeout, signal: abort.signal })
     } catch (error) {
+      if (!running) break
       opts.log(`轮询失败: ${error instanceof Error ? error.message : error} — 2s 后重试`)
       await sleep(2000)
       continue
@@ -53,6 +60,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       await sleep(30000)
       continue
     }
+    if (resp.longpolling_timeout_ms) timeout = resp.longpolling_timeout_ms + 10_000
     if (resp.get_updates_buf && resp.get_updates_buf !== cursor) {
       cursor = resp.get_updates_buf
       state.cursor = cursor
@@ -64,14 +72,20 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       if (msgKey && processed.has(msgKey)) continue
       if (msgKey) {
         processed.add(msgKey)
-        if (processed.size > 2000) processed.clear() // 防无界增长
+        if (processed.size > 2000) processed.delete(processed.values().next().value!)
       }
       const text = msg.item_list?.find((item) => item.type === 1)?.text_item?.text
       if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
       if (!text || !msg.from_user_id || !msg.context_token) continue
-      await handleMessage({ opts, sdk, token: cred.token, baseUrl: cred.baseUrl, accountId: cred.accountId, ownerUserId: cred.userId, msg, text })
+      try {
+        await handleMessage({ opts, sdk, token: cred.token, baseUrl: cred.baseUrl, accountId: cred.accountId, ownerUserId: cred.userId, msg, text })
+      } catch (error) {
+        opts.log(`消息处理失败: ${error instanceof Error ? error.message : error}`)
+      }
     }
   }
+  process.off("SIGINT", stop)
+  process.off("SIGTERM", stop)
   opts.log("桥已停止")
 }
 
@@ -94,16 +108,17 @@ async function handleMessage(args: {
   state.contexts[userKey] = msg.context_token!
   writeState(state)
 
-  // 发送前刷新 context_token(90-160s 过期, 参考实现要求发前 getconfig)
-  let ctxToken = msg.context_token!
+  // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
+  const ctxToken = msg.context_token!
   const reply = async (replyText: string) => {
-    ctxToken = await refreshContextToken({ token, baseUrl, userId: msg.from_user_id!, contextToken: ctxToken })
+    const clientId = `lychee-weixin:${Date.now()}-${randomUUID()}`
     for (let i = 0; i < 2; i++) {
       try {
-        await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: ctxToken, text: replyText })
+        await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: ctxToken, text: replyText, clientId })
         return
       } catch (error) {
         opts.log(`发送失败(第${i + 1}次): ${error instanceof Error ? error.message : error}`)
+        if (i === 1) throw error
       }
     }
   }
@@ -190,10 +205,10 @@ async function handleMessage(args: {
         text,
         model,
         reply: async (replyText) => {
-          const chunks = chunkText(replyText)
+          const chunks = chunkText(replyText, 1990)
           for (let i = 0; i < chunks.length; i++) {
             const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length}) ` : ""
-            await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: msg.context_token!, text: prefix + chunks[i] })
+            await reply(prefix + chunks[i])
           }
         },
         log: (m) => opts.log(m),

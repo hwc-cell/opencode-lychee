@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto"
 
 const DEFAULT_BASE = "https://ilinkai.weixin.qq.com"
+const API_TIMEOUT_MS = 30_000
 // iLink 协议版本(2.1.1 编码为 0x00MMNNPP 整数, 服务端按此识别客户端)
 const ILINK_APP_CLIENT_VERSION = 131329
 
@@ -42,6 +43,7 @@ export type QrStage =
 export async function getQr(): Promise<{ qrcode: string; qrcode_img_content: string }> {
   const res = await fetch(`${DEFAULT_BASE}/ilink/bot/get_bot_qrcode?bot_type=3`, {
     headers: { SKRouteTag: "1001" },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`获取二维码失败: HTTP ${res.status}`)
   const json = (await res.json()) as { qrcode?: string; qrcode_img_content?: string }
@@ -75,40 +77,43 @@ export async function loginUntilConfirmed(opts: {
   let baseUrl = DEFAULT_BASE
   let refreshCount = 0
   for (;;) {
+    let stage: QrStage
     try {
-      const stage = await pollQr(qr.qrcode, baseUrl, opts.signal)
-      if (stage.status === "confirmed") {
-        return {
-          token: stage.bot_token,
-          botId: stage.ilink_bot_id,
-          userId: stage.ilink_user_id,
-          baseUrl: stage.baseurl ?? DEFAULT_BASE,
-        }
-      }
-      if (stage.status === "expired") {
-        // 二维码 150s 过期: 自动换新码继续等(最多 3 次)
-        refreshCount += 1
-        if (refreshCount > 3) throw new Error("二维码连续过期, 请重新运行 lychee weixin login")
-        qr = await getQr()
-        baseUrl = DEFAULT_BASE
-        opts.onQr?.(qr)
-        opts.onStage?.({ status: "wait" })
-        continue
-      }
-      if (stage.status === "scaned_but_redirect" && stage.redirect_host) {
-        const host = stage.redirect_host.includes("://") ? stage.redirect_host : `https://${stage.redirect_host}`
-        if (host !== baseUrl) {
-          baseUrl = host
-          opts.onStage?.({ status: "wait" })
-        }
-        continue
-      }
-      opts.onStage?.(stage)
+      stage = await pollQr(qr.qrcode, baseUrl, opts.signal)
     } catch (error) {
       if (opts.signal?.aborted) throw error
       // 轮询超时/网络抖动: 重试(服务端 ~30s 一轮)
       opts.onStage?.({ status: "wait" } as QrStage)
+      await new Promise((r) => setTimeout(r, 1000))
+      continue
     }
+    if (stage.status === "confirmed") {
+      return {
+        token: stage.bot_token,
+        botId: stage.ilink_bot_id,
+        userId: stage.ilink_user_id,
+        baseUrl: stage.baseurl ?? DEFAULT_BASE,
+      }
+    }
+    if (stage.status === "expired") {
+      // 二维码 150s 过期: 自动换新码继续等(最多 3 次)
+      refreshCount += 1
+      if (refreshCount > 3) throw new Error("二维码连续过期, 请重新运行 lychee weixin login")
+      qr = await getQr()
+      baseUrl = DEFAULT_BASE
+      opts.onQr?.(qr)
+      opts.onStage?.({ status: "wait" })
+      continue
+    }
+    if (stage.status === "scaned_but_redirect" && stage.redirect_host) {
+      const host = stage.redirect_host.includes("://") ? stage.redirect_host : `https://${stage.redirect_host}`
+      if (host !== baseUrl) {
+        baseUrl = host
+        opts.onStage?.({ status: "wait" })
+      }
+      continue
+    }
+    opts.onStage?.(stage)
     await new Promise((r) => setTimeout(r, 1000))
   }
 }
@@ -127,32 +132,6 @@ export type WeixinMessage = {
   item_list?: Array<{ type?: number; text_item?: { text?: string } }>
 }
 
-/** 刷新 context_token(iLink 的 context_token ~90-160s 过期, 发消息前应刷新, 失败返回原值) */
-export async function refreshContextToken(opts: {
-  token: string
-  baseUrl: string
-  userId: string
-  contextToken: string
-}): Promise<string> {
-  try {
-    const res = await fetch(`${opts.baseUrl}/ilink/bot/getconfig`, {
-      method: "POST",
-      headers: baseHeaders(opts.token),
-      body: JSON.stringify({
-        ilink_user_id: opts.userId,
-        context_token: opts.contextToken,
-        base_info: baseInfo(),
-      }),
-    })
-    if (!res.ok) return opts.contextToken
-    const json = (await res.json()) as { context_token?: string; ret?: number }
-    if (json.ret !== undefined && json.ret !== 0) return opts.contextToken
-    return json.context_token || opts.contextToken
-  } catch {
-    return opts.contextToken
-  }
-}
-
 export async function getUpdates(opts: {
   token: string
   baseUrl: string
@@ -160,6 +139,8 @@ export async function getUpdates(opts: {
   timeoutMs?: number
   signal?: AbortSignal
 }): Promise<{ ret: number; msgs?: WeixinMessage[]; get_updates_buf?: string; longpolling_timeout_ms?: number }> {
+  const timeout = AbortSignal.timeout(opts.timeoutMs ?? 45_000)
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout
   const res = await fetch(`${opts.baseUrl}/ilink/bot/getupdates`, {
     method: "POST",
     headers: baseHeaders(opts.token),
@@ -167,7 +148,7 @@ export async function getUpdates(opts: {
       get_updates_buf: opts.cursor,
       base_info: baseInfo(),
     }),
-    signal: opts.signal,
+    signal,
   })
   if (!res.ok) throw new Error(`getupdates 失败: HTTP ${res.status}`)
   const json = (await res.json()) as {
@@ -188,8 +169,9 @@ export async function sendText(opts: {
   toUserId: string
   contextToken: string
   text: string
+  clientId?: string
 }): Promise<void> {
-  const clientId = `lychee-weixin:${Date.now()}-${randomBytes(4).toString("hex")}`
+  const clientId = opts.clientId ?? `lychee-weixin:${Date.now()}-${randomBytes(4).toString("hex")}`
   const msg = {
     from_user_id: "",
     to_user_id: opts.toUserId,
@@ -203,6 +185,7 @@ export async function sendText(opts: {
     method: "POST",
     headers: baseHeaders(opts.token),
     body: JSON.stringify({ msg, base_info: baseInfo() }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`发送失败: HTTP ${res.status}`)
   const json = (await res.json().catch(() => ({}))) as { ret?: number }
@@ -219,6 +202,7 @@ export function chunkText(text: string, limit = 2000): string[] {
     if (cut <= 0) cut = rest.lastIndexOf("\n", limit)
     if (cut <= 0) cut = rest.lastIndexOf(" ", limit)
     if (cut <= 0) cut = limit
+    if ((rest.charCodeAt(cut - 1) & 0xfc00) === 0xd800) cut -= 1
     chunks.push(rest.slice(0, cut))
     rest = rest.slice(cut)
   }
@@ -241,6 +225,7 @@ export async function sendTyping(opts: {
       context_token: opts.contextToken,
       base_info: baseInfo(),
     }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   }).catch(() => undefined)
   if (!cfg?.ok) return
   const cfgJson = (await cfg.json()) as { typing_ticket?: string }
@@ -254,5 +239,6 @@ export async function sendTyping(opts: {
       status: opts.status,
       base_info: baseInfo(),
     }),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   }).catch(() => undefined)
 }

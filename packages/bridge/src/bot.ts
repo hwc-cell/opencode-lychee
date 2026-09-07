@@ -74,6 +74,9 @@ export function enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
     () => undefined,
   )
   queues.set(key, tail)
+  void tail.then(() => {
+    if (queues.get(key) === tail) queues.delete(key)
+  })
   return run
 }
 
@@ -109,10 +112,10 @@ function rowsOf(res: unknown): AssistantMessage[] {
 }
 
 async function lastAssistant(v2: V2Session, sessionID: string): Promise<AssistantMessage | undefined> {
-  const res = await v2.messages({ sessionID, limit: 10, order: "asc" }).catch(() => undefined)
+  const res = await v2.messages({ sessionID, limit: 10, order: "desc" }).catch(() => undefined)
   if (!res) return undefined
   const rows = rowsOf(res).filter((row) => row.type === "assistant")
-  return rows.at(-1)
+  return rows[0]
 }
 
 function assistantText(assistant: AssistantMessage): string {

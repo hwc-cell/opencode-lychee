@@ -7,7 +7,7 @@
 | --- | --- |
 | `/autostart` | 开启后台常驻 (macOS launchd: 开机自启 + 崩溃重启, 仅 owner) |
 | `/autostop` | 关闭后台常驻 (仅 owner) |
-| `/halp` | 查看可用指令 |
+| `/help` | 查看可用指令 (`/halp` 仍兼容) |
 
 | 运行状态 | 通知 |
 | --- | --- |
@@ -56,5 +56,5 @@ await enqueue(userKey, () =>
   - prompt 每次尝试生成 `msg_` 前缀新 id(失败后复用会冲突);
   - 看门狗 `LYCHEE_MODEL_TIMEOUT_MS`(默认 10 分钟)超时 → interrupt → 重试;
   - 运行中每 2s 刷新"当前运行"文本/工具名, 供打断通知使用;
-  - 同一 `userKey` 通过 `enqueue` 串行, 新消息打断旧任务后排队接管。
+  - 同一 `userKey` 通过 `enqueue` 串行; 支持并发接收的平台可让新消息打断旧任务后排队接管。
 - **语言**: 所有文案按 `OPENCODE_LANG`(默认 zh; 带 `en` 前缀切英文)输出, 见 `i18n.ts`。

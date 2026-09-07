@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -40,12 +40,15 @@ export function readState(): WeixinState {
 
 export function writeState(state: WeixinState) {
   mkdirSync(STATE_DIR, { recursive: true })
-  writeFileSync(CRED_FILE, JSON.stringify(state, null, 2), { mode: 0o600 })
+  const tmp = `${CRED_FILE}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 })
+  renameSync(tmp, CRED_FILE)
+  chmodSync(CRED_FILE, 0o600)
 }
 
 export function clearState() {
   try {
-    writeFileSync(CRED_FILE, "{}", { mode: 0o600 })
+    writeState({})
   } catch {
     // 忽略
   }

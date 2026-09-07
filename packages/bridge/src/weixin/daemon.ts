@@ -1,6 +1,6 @@
-import { existsSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { spawnSync } from "node:child_process"
 
 // macOS LaunchAgent 常驻: 开机自启 + 崩溃自动重启 (按通道安装, 如 weixin/slack/telegram)
@@ -66,6 +66,8 @@ export function installAutoStart(channel: string, dir: string, t: TFunc): { ok: 
   }
   const program = [launcher, channel, "run", "--dir", dir]
   const path = plistPath(channel)
+  mkdirSync(dirname(path), { recursive: true })
+  mkdirSync(dirname(logPath(channel)), { recursive: true })
   writeFileSync(path, plist(channel, program, homedir()))
 
   // 先卸载旧的再加载新的, 保证参数生效

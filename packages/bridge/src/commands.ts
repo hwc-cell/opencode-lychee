@@ -6,7 +6,7 @@ import type { BridgeModelInfo, BridgeModelRef } from "./bot"
 // 适配器只需在收到用户文本时先调用 handleChatCommand, 返回 true 表示已被命令消费。
 // 文案按 OPENCODE_LANG 自动切换 zh/en。
 
-export const CHAT_COMMANDS = ["/model", "/autostart", "/autostop", "/halp"]
+export const CHAT_COMMANDS = ["/model", "/autostart", "/autostop", "/help", "/halp"]
 
 export async function handleChatCommand(args: {
   channel: string
@@ -30,9 +30,9 @@ export async function handleChatCommand(args: {
     return handleModelCommand(args.text, args.models, args.reply, args.log)
   }
 
-  if (command === "/halp") {
+  if (command === "/help" || command === "/halp") {
     await args.reply(t("cmdHelp"))
-    args.log("聊天指令 /halp 已回复")
+    args.log(`聊天指令 ${command} 已回复`)
     return true
   }
 
@@ -85,7 +85,11 @@ async function handleModelCommand(
   }
 
   // /model <名称> [强度]: 优先精确匹配名称; 匹配不上时试"去掉末尾词作为强度"
-  const exact = list.find((m) => m.enabled !== false && normName(m.name ?? m.id) === normName(rest))
+  const exact = list.find(
+    (m) =>
+      m.enabled !== false &&
+      [m.name ?? m.id, m.id, `${m.providerID}/${m.id}`].some((name) => normName(name) === normName(rest)),
+  )
   let match: BridgeModelInfo | undefined = exact
   let variant: string | undefined
   if (!match) {
