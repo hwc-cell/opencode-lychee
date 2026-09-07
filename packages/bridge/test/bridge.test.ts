@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { deliverMessage, enqueue, isQueued, type BotSdk } from "../src/bot"
 import { handleChatCommand } from "../src/commands"
-import { chunkText, loginUntilConfirmed } from "../src/weixin/client"
+import { chunkText, loginUntilConfirmed, messageText } from "../src/weixin/client"
 
 const fetch = globalThis.fetch
 
@@ -77,6 +77,40 @@ describe("weixin client", () => {
 
     await expect(loginUntilConfirmed({})).rejects.toThrow("二维码连续过期")
     expect(id).toBe(4)
+  })
+
+  test("waits until the QR code has rendered before polling", async () => {
+    const order: string[] = []
+    globalThis.fetch = (async (input) => {
+      if (String(input).includes("get_bot_qrcode")) {
+        return Response.json({ qrcode: "qr", qrcode_img_content: "https://example.com/qr" })
+      }
+      order.push("poll")
+      return Response.json({
+        status: "confirmed",
+        bot_token: "token",
+        ilink_bot_id: "bot",
+        ilink_user_id: "user",
+      })
+    }) as typeof globalThis.fetch
+
+    await loginUntilConfirmed({
+      onQr: async () => {
+        order.push("render-start")
+        await Promise.resolve()
+        order.push("render-end")
+      },
+    })
+
+    expect(order).toEqual(["render-start", "render-end", "poll"])
+  })
+
+  test("combines text items and falls back to voice transcripts", () => {
+    expect(messageText({ item_list: [{ type: 1, text_item: { text: "one" } }, { type: 1, text_item: { text: "two" } }] })).toBe(
+      "one\ntwo",
+    )
+    expect(messageText({ item_list: [{ type: 3, voice_item: { text: "voice" } }] })).toBe("voice")
+    expect(messageText({ item_list: [{ type: 2, image_item: {} }] })).toBeUndefined()
   })
 })
 

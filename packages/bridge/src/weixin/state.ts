@@ -26,8 +26,17 @@ export type WeixinState = {
   workDir?: string
   // (accountId#userId) -> 用户选择的模型(微信 /model 切换)
   models?: Record<string, { id: string; providerID: string; variant?: string }>
-  // 默认模型(lychee weixin configure 配置; 未配置时微信发消息会被引导配置)
+  // 默认模型(OpenCode-Lychee weixin configure 配置; 未配置时微信发消息会被引导配置)
   model?: { id: string; providerID: string; variant?: string }
+  health?: {
+    status: "starting" | "online" | "offline" | "expired" | "stopped"
+    pid?: number
+    updatedAt: string
+    startedAt?: string
+    lastInboundAt?: string
+    lastOutboundAt?: string
+    lastError?: string
+  }
 }
 
 export function readState(): WeixinState {
@@ -44,6 +53,13 @@ export function writeState(state: WeixinState) {
   writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 })
   renameSync(tmp, CRED_FILE)
   chmodSync(CRED_FILE, 0o600)
+}
+
+export function updateState(update: (state: WeixinState) => void): WeixinState {
+  const state = readState()
+  update(state)
+  writeState(state)
+  return state
 }
 
 export function clearState() {

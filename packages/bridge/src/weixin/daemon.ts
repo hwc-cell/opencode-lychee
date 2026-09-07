@@ -16,6 +16,15 @@ export function isAutoStartInstalled(channel: string): boolean {
   return existsSync(plistPath(channel))
 }
 
+export function autoStartStatus(channel: string): { installed: boolean; loaded: boolean; running: boolean; pid?: number } {
+  const installed = isAutoStartInstalled(channel)
+  if (process.platform !== "darwin") return { installed, loaded: false, running: false }
+  const res = spawnSync("launchctl", ["print", `gui/${process.getuid()}/com.lychee.${channel}`], { encoding: "utf8" })
+  if (res.status !== 0) return { installed, loaded: false, running: false }
+  const pid = res.stdout.match(/\bpid\s*=\s*(\d+)/)?.[1]
+  return { installed, loaded: true, running: Boolean(pid), ...(pid ? { pid: Number(pid) } : {}) }
+}
+
 function xmlEscape(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
@@ -44,7 +53,10 @@ ${args}
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>StandardOutPath</key>
   <string>${xmlEscape(logPath(channel))}</string>
   <key>StandardErrorPath</key>
@@ -85,7 +97,10 @@ export function removeAutoStart(channel: string, t: TFunc): { ok: boolean; messa
   }
   const path = plistPath(channel)
   if (!existsSync(path)) return { ok: true, message: t("cmdNotInstalled") }
-  spawnSync("launchctl", ["unload", "-w", path], { stdio: "ignore" })
+  if (autoStartStatus(channel).loaded) {
+    const res = spawnSync("launchctl", ["unload", "-w", path], { stdio: "ignore" })
+    if (res.status !== 0) return { ok: false, message: t("cmdStopFailed") }
+  }
   rmSync(path, { force: true })
   return { ok: true, message: t("cmdOff") }
 }

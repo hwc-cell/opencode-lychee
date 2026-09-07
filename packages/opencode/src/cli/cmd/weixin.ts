@@ -1,10 +1,11 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { existsSync } from "node:fs"
 import type { Argv, CommandModule } from "yargs"
 import { UI } from "../ui"
 import { createInterface } from "node:readline/promises"
 import { AUTH_PROFILES } from "@opencode-ai/core/catalog"
-import { chunkText, installAutoStart, loginUntilConfirmed, removeAutoStart, sendText } from "@opencode-ai/bridge"
+import { autoStartStatus, clearState, installAutoStart, loginUntilConfirmed, removeAutoStart } from "@opencode-ai/bridge"
 import { t as bridgeT } from "@opencode-ai/bridge"
 import { readState, writeState, type WeixinState } from "@opencode-ai/bridge"
 
@@ -42,6 +43,16 @@ const ask = async (question: string): Promise<string> => {
   return value.trim()
 }
 
+function isProcessRunning(pid?: number): boolean {
+  if (!pid) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function handleConfigure(): Promise<void> {
   const candidates = modelCandidates()
   console.log("🍈 配置默认模型(微信 /model 可随时切换):")
@@ -63,7 +74,7 @@ async function handleConfigure(): Promise<void> {
   state.model = { id: model.id, providerID: model.providerID, ...(variant ? { variant } : {}) }
   writeState(state)
   console.log(`✅ 默认模型已配置: ${model.name}${variant ? `(强度:${variant})` : ""}`)
-  console.log("· 现在可以启动桥: lychee weixin autostart(常驻)或 lychee weixin run")
+  console.log("· 现在可以启动桥: OpenCode-Lychee weixin autostart(常驻)或 OpenCode-Lychee weixin run")
 }
 
 const ConfigureCommand: CommandModule = {
@@ -95,7 +106,7 @@ const LoginCommand: CommandModule = {
     UI.println("· 本项目与腾讯 / 微信官方无任何关联。")
 
     const cred = await loginUntilConfirmed({
-      onQr: (qr) => void showQr(qr),
+      onQr: showQr,
       onStage: (stage) => {
         // 二维码轮询是 ~30s 长轮询, 只在阶段变化时提示, 避免刷屏
         const label =
@@ -121,6 +132,8 @@ const LoginCommand: CommandModule = {
       savedAt: new Date().toISOString(),
     }
     state.cursor = ""
+    state.contexts = {}
+    state.health = { status: "stopped", updatedAt: new Date().toISOString() }
     writeState(state)
     UI.println(`🎉 登录成功: ${cred.botId}`)
     UI.println("")
@@ -128,7 +141,11 @@ const LoginCommand: CommandModule = {
     if (!state.model) {
       UI.println("👇 首次使用: 请配置默认 AI 模型(配置后才能用):")
       await handleConfigure()
-      return
+    }
+    if (autoStartStatus("weixin").installed) {
+      const current = readState()
+      const result = installAutoStart("weixin", current.workDir ?? process.cwd(), bridgeT)
+      UI.println(`${result.ok ? "✅" : "⚠️"} 已刷新后台服务: ${result.message}`)
     }
     UI.println("接下来:")
     UI.println("  → 一键常驻(推荐, 开机自启+崩溃重启): OpenCode-Lychee weixin autostart")
@@ -147,13 +164,13 @@ const RunCommand: CommandModule = {
   handler: async (argv) => {
     const state = readState()
     if (!state.credential) {
-      console.error("未登录, 请先运行: lychee weixin login")
+      console.error("未登录, 请先运行: OpenCode-Lychee weixin login")
       process.exit(1)
     }
     const dir = String(argv.dir ?? state.workDir ?? process.cwd())
     state.workDir = dir
     writeState(state)
-    if (!state.model) console.log("⚠️ 尚未配置默认模型, 微信发消息会被引导: 先运行 lychee weixin configure")
+    if (!state.model) console.log("⚠️ 尚未配置默认模型, 微信发消息会被引导: 先运行 OpenCode-Lychee weixin configure")
     console.log(`🤖 AI 工作目录: ${dir}`)
     let serverUrl: string
     const provided = (argv.server as string | undefined) ?? process.env.OPENCODE_SERVER_URL
@@ -176,15 +193,39 @@ const RunCommand: CommandModule = {
 
 const StatusCommand: CommandModule = {
   command: "status",
-  describe: "查看微信 Bot 登录状态",
+  describe: "查看微信 Bot 登录与连接状态",
   handler: () => {
     const state = readState()
+    const daemon = autoStartStatus("weixin")
     if (!state.credential) {
-      console.log("未登录")
-      return
+      console.log("登录: 未登录")
+    } else {
+      console.log(`登录: 已登录 (${state.credential.accountId})`)
+      console.log(`登录时间: ${state.credential.savedAt}`)
     }
-    console.log(`已登录: ${state.credential.accountId}`)
-    console.log(`登录时间: ${state.credential.savedAt}`)
+    const daemonLabel = daemon.running
+      ? `运行中${daemon.pid ? ` (PID ${daemon.pid})` : ""}`
+      : daemon.loaded
+        ? "已加载, 当前未运行"
+        : daemon.installed
+          ? "已安装, 当前未加载"
+          : "未安装"
+    console.log(`后台常驻: ${daemonLabel}`)
+    const health = state.health
+    if (!health) {
+      console.log("连接: 尚未启动")
+    } else {
+      const age = Date.now() - Date.parse(health.updatedAt)
+      const alive = isProcessRunning(health.pid)
+      const fresh = Number.isFinite(age) && age < 120_000
+      const labels = { starting: "启动中", online: "在线", offline: "网络异常", expired: "登录失效", stopped: "已停止" } as const
+      const suffix = (health.status === "online" || health.status === "starting") && (!alive || !fresh) ? " (状态已过期)" : ""
+      console.log(`连接: ${labels[health.status]}${suffix}${health.pid && alive ? ` (PID ${health.pid})` : ""}`)
+      console.log(`状态更新时间: ${health.updatedAt}`)
+      if (health.lastInboundAt) console.log(`最近收消息: ${health.lastInboundAt}`)
+      if (health.lastOutboundAt) console.log(`最近发消息: ${health.lastOutboundAt}`)
+      if (health.lastError) console.log(`最近错误: ${health.lastError}`)
+    }
     const sessions = Object.keys(state.sessions ?? {}).length
     console.log(`映射会话数: ${sessions}`)
   },
@@ -196,15 +237,19 @@ const AutostartCommand: CommandModule = {
   handler: () => {
     const state = readState()
     if (!state.credential) {
-      console.log("❌ 未登录, 先运行: lychee weixin login")
+      console.log("❌ 未登录, 先运行: OpenCode-Lychee weixin login")
       return
     }
     const dir = state.workDir ?? process.cwd()
+    if (!existsSync(dir)) {
+      console.log(`❌ AI 工作目录不存在: ${dir}`)
+      return
+    }
     state.workDir = dir
     writeState(state)
     const result = installAutoStart("weixin", dir, bridgeT)
     console.log(`${result.ok ? "✅" : "⚠️"} ${result.message}`)
-    if (result.ok) console.log("· 停止常驻: lychee weixin autostop")
+    if (result.ok) console.log("· 停止常驻: OpenCode-Lychee weixin autostop")
   },
 }
 
@@ -214,6 +259,17 @@ const AutostopCommand: CommandModule = {
   handler: () => {
     const result = removeAutoStart("weixin", bridgeT)
     console.log(`${result.ok ? "✅" : "⚠️"} ${result.message}`)
+  },
+}
+
+const LogoutCommand: CommandModule = {
+  command: "logout",
+  describe: "退出微信 Bot 并清除本地登录状态",
+  handler: () => {
+    const result = removeAutoStart("weixin", bridgeT)
+    clearState()
+    console.log("✅ 已清除微信登录、会话和连接状态")
+    if (!result.ok) console.log(`⚠️ ${result.message}; 运行中的桥检测到凭证变化后仍会自行退出`)
   },
 }
 
@@ -228,6 +284,7 @@ export const WeixinCommand: CommandModule = {
       .command(StatusCommand)
       .command(AutostartCommand)
       .command(AutostopCommand)
+      .command(LogoutCommand)
   },
   handler: () => {
     const state = readState()
@@ -236,7 +293,7 @@ export const WeixinCommand: CommandModule = {
       console.log("下一步: OpenCode-Lychee weixin run 启动消息桥")
     } else {
       console.log("未登录微信 Bot")
-      console.log("用法: OpenCode-Lychee weixin login | run | status")
+      console.log("用法: OpenCode-Lychee weixin login | configure | run | status | autostart | autostop | logout")
     }
   },
 }
