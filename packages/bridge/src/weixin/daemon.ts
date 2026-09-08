@@ -19,9 +19,10 @@ export function isAutoStartInstalled(channel: string): boolean {
 export function autoStartStatus(channel: string): { installed: boolean; loaded: boolean; running: boolean; pid?: number } {
   const installed = isAutoStartInstalled(channel)
   if (process.platform !== "darwin") return { installed, loaded: false, running: false }
-  const res = spawnSync("launchctl", ["print", `gui/${process.getuid()}/com.lychee.${channel}`], { encoding: "utf8" })
+  const uid = process.getuid ? process.getuid() : 0
+  const res = spawnSync("launchctl", ["print", `gui/${uid}/com.lychee.${channel}`], { encoding: "utf8" })
   if (res.status !== 0) return { installed, loaded: false, running: false }
-  const pid = res.stdout.match(/\bpid\s*=\s*(\d+)/)?.[1]
+  const pid = res.stdout?.match(/\bpid\s*=\s*(\d+)/)?.[1]
   return { installed, loaded: true, running: Boolean(pid), ...(pid ? { pid: Number(pid) } : {}) }
 }
 
