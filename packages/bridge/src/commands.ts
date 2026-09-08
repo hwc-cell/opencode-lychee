@@ -1,4 +1,4 @@
-import { installAutoStart, isAutoStartInstalled, removeAutoStart } from "./weixin/daemon"
+import { autoStartStatus, installAutoStart, removeAutoStart } from "./weixin/daemon"
 import { t } from "./i18n"
 import type { BridgeModelInfo, BridgeModelRef } from "./bot"
 
@@ -44,7 +44,7 @@ export async function handleChatCommand(args: {
     }
     const result =
       command === "/autostart"
-        ? isAutoStartInstalled(args.channel)
+        ? autoStartStatus(args.channel).running
           ? { ok: true, message: t("cmdAlreadyOn") }
           : installAutoStart(args.channel, args.workDir, t)
         : removeAutoStart(args.channel, t)

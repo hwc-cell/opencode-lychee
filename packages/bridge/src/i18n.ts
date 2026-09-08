@@ -39,6 +39,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdNotFound: "⚠️ 后台常驻仅支持 macOS",
     cmdMissingLauncher: "未找到启动器, 请先执行: cp packages/opencode/lychee.sh ~/.local/bin/OpenCode-Lychee && chmod +x ~/.local/bin/OpenCode-Lychee",
     cmdLaunchFailed: "launchctl 加载失败, 请手动检查 plist 文件",
+    cmdStopFailed: "launchctl 停止失败, 后台进程可能仍在运行",
     cmdNotInstalled: "未开启过后台常驻",
     cmdNotDarwin: "非 macOS, 无 launchd 配置可移除",
     cmdLogPrefix: "后台常驻",
@@ -48,7 +49,8 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdModelVariant: "思考强度:{v}",
     cmdModelSwitched: "✅ 已切换为 {model}",
     cmdModelSwitchFailed: "⚠️ 切换 {model} 失败(可能当前不可用)",
-    needModelConfig: "⚠️ 还没配置模型哦: 请运行 lychee weixin configure(或直接发 /model 选择)",
+    needModelConfig: "⚠️ 还没配置模型哦: 请运行 OpenCode-Lychee weixin configure(或直接发 /model 选择)",
+    unsupported: "暂时只支持文字消息; 图片、文件和视频支持正在路上。语音有转写文字时可以直接识别。",
   },
   en: {
     timeout: "⚡️ Model timeout, attempt {n}/3",
@@ -79,6 +81,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdNotFound: "⚠️ Background daemon requires macOS",
     cmdMissingLauncher: "Launcher not found. Run: cp packages/opencode/lychee.sh ~/.local/bin/OpenCode-Lychee && chmod +x ~/.local/bin/OpenCode-Lychee",
     cmdLaunchFailed: "launchctl failed to load, check the plist file manually",
+    cmdStopFailed: "launchctl failed to stop; the background process may still be running",
     cmdNotInstalled: "Background daemon was never enabled",
     cmdNotDarwin: "Not macOS, nothing to remove",
     cmdLogPrefix: "daemon",
@@ -88,7 +91,8 @@ const messages: Record<BridgeLang, Record<string, string>> = {
     cmdModelVariant: "intensity:{v}",
     cmdModelSwitched: "✅ Switched to {model}",
     cmdModelSwitchFailed: "⚠️ Failed to switch to {model} (maybe unavailable)",
-    needModelConfig: "⚠️ No model configured yet: run lychee weixin configure (or send /model)",
+    needModelConfig: "⚠️ No model configured yet: run OpenCode-Lychee weixin configure (or send /model)",
+    unsupported: "Only text is supported for now. Voice messages work when a transcript is available.",
   },
 }
 

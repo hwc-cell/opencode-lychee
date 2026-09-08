@@ -1,9 +1,9 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { randomUUID } from "node:crypto"
-import { chunkText, getUpdates, sendText, sendTyping, type WeixinMessage } from "./client"
-import { readState, writeState } from "./state"
+import { chunkText, getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
+import { readState, updateState } from "./state"
 import { handleChatCommand } from "../commands"
-import { deliverMessage, enqueue, interruptCurrent, isQueued, type BotSdk, type BridgeModelInfo } from "../bot"
+import { deliverMessage, enqueue, interruptAll, interruptCurrent, isQueued, type BotSdk, type BridgeModelInfo, type BridgeModelRef } from "../bot"
 import { t } from "../i18n"
 
 export type BridgeOptions = {
@@ -19,19 +19,83 @@ const makeClient = (serverUrl: string): BotSdk =>
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+type Session = { id: string; created: boolean }
+type SessionFn = (key: string, model?: BridgeModelRef) => Promise<Session | undefined>
+
+function health(status: NonNullable<ReturnType<typeof readState>["health"]>["status"], error?: string) {
+  const now = new Date().toISOString()
+  updateState((state) => {
+    state.health = {
+      ...state.health,
+      status,
+      pid: status === "stopped" || status === "expired" ? undefined : process.pid,
+      updatedAt: now,
+      startedAt: status === "starting" ? now : (state.health?.startedAt ?? now),
+      lastError: error,
+    }
+  })
+}
+
 export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const state = readState()
   const cred = state.credential
-  if (!cred) throw new Error("未登录: 请先运行 lychee weixin login")
+  if (!cred) throw new Error("未登录: 请先运行 OpenCode-Lychee weixin login")
   const sdk = makeClient(opts.serverUrl)
+  const pending = new Map<string, Promise<Session | undefined>>()
+  const checked = new Set<string>()
+  const session: SessionFn = (key, model) => {
+    const active = pending.get(key)
+    if (active) return active.then((value) => (value ? { ...value, created: false } : value))
+    const task = (async () => {
+      const stored = readState().sessions?.[key]
+      if (stored && checked.has(stored)) return { id: stored, created: false }
+      if (stored) {
+        const valid = await sdk.v2.session.messages({ sessionID: stored, limit: 1, order: "desc" }, { throwOnError: true }).then(
+          () => true,
+          () => false,
+        )
+        if (valid) {
+          checked.add(stored)
+          return { id: stored, created: false }
+        }
+        updateState((next) => {
+          if (next.sessions?.[key] === stored) delete next.sessions[key]
+        })
+        opts.log(`旧会话已失效, 正在为 ${key} 自动重建`)
+      }
+      const res = (await sdk.v2.session.create({ location: { directory: opts.dir }, model }, { throwOnError: true })) as {
+        data?: { data?: { id?: string } }
+      }
+      const id = res.data?.data?.id
+      if (!id) return undefined
+      checked.add(id)
+      updateState((next) => {
+        if (next.credential?.token !== cred.token) return
+        next.sessions = next.sessions ?? {}
+        next.sessions[key] = id
+      })
+      return { id, created: true }
+    })().catch((error) => {
+      opts.log(`会话准备失败 (${key}): ${error instanceof Error ? error.message : error}`)
+      return undefined
+    })
+    pending.set(key, task)
+    const clear = () => {
+      if (pending.get(key) === task) pending.delete(key)
+    }
+    void task.then(clear, clear)
+    return task
+  }
   let running = true
   const abort = new AbortController()
   const stop = () => {
     running = false
     abort.abort()
+    void interruptAll(sdk)
   }
   process.on("SIGINT", stop)
   process.on("SIGTERM", stop)
+  health("starting")
 
   let cursor = state.cursor ?? ""
   let timeout = 45_000
@@ -40,31 +104,46 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   opts.log(`微信 Bot 已启动 (${cred.accountId}), 等待消息… (Ctrl+C 停止)`)
 
   while (running) {
+    if (readState().credential?.token !== cred.token) {
+      opts.log("检测到登录凭证已更新, 当前桥即将退出并由后台服务重新加载")
+      break
+    }
     let resp
     try {
       resp = await getUpdates({ token: cred.token, baseUrl: cred.baseUrl, cursor, timeoutMs: timeout, signal: abort.signal })
     } catch (error) {
       if (!running) break
-      opts.log(`轮询失败: ${error instanceof Error ? error.message : error} — 2s 后重试`)
+      if (readState().credential?.token !== cred.token) break
+      const message = error instanceof Error ? error.message : String(error)
+      health("offline", message)
+      opts.log(`轮询失败: ${message} — 2s 后重试`)
       await sleep(2000)
       continue
     }
+    if (readState().credential?.token !== cred.token) break
     if (resp.ret === -14) {
-      // 会话过期(凭证仍有效): 参考实现为"暂停等待", 不删除凭据
-      opts.log("⚠️ 微信会话暂离(-14), 60s 后自动重试(持续离线请运行 lychee weixin login 重新扫码)")
-      await sleep(60000)
-      continue
+      updateState((next) => {
+        next.cursor = ""
+        next.contexts = {}
+      })
+      health("expired", "微信登录已失效(-14), 请重新扫码")
+      opts.log("⚠️ 微信登录已失效(-14), 已停止轮询; 请运行 OpenCode-Lychee weixin login 重新扫码")
+      break
     }
     if (resp.ret !== 0) {
+      health("offline", `getupdates ret=${resp.ret}`)
       opts.log(`getupdates ret=${resp.ret}, 30s 后重试`)
       await sleep(30000)
       continue
     }
+    health("online")
     if (resp.longpolling_timeout_ms) timeout = resp.longpolling_timeout_ms + 10_000
     if (resp.get_updates_buf && resp.get_updates_buf !== cursor) {
       cursor = resp.get_updates_buf
-      state.cursor = cursor
-      writeState(state)
+      updateState((next) => {
+        if (next.credential?.token !== cred.token) return
+        next.cursor = cursor
+      })
     }
     for (const msg of resp.msgs ?? []) {
       if (msg.message_type !== 1) continue // 只处理用户消息
@@ -74,18 +153,39 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
         processed.add(msgKey)
         if (processed.size > 2000) processed.delete(processed.values().next().value!)
       }
-      const text = msg.item_list?.find((item) => item.type === 1)?.text_item?.text
+      const text = messageText(msg)
       if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
-      if (!text || !msg.from_user_id || !msg.context_token) continue
-      try {
-        await handleMessage({ opts, sdk, token: cred.token, baseUrl: cred.baseUrl, accountId: cred.accountId, ownerUserId: cred.userId, msg, text })
-      } catch (error) {
+      if (!msg.from_user_id || !msg.context_token) continue
+      updateState((next) => {
+        if (next.credential?.token !== cred.token) return
+        const now = new Date().toISOString()
+        next.contexts = next.contexts ?? {}
+        next.contexts[`${cred.accountId}#${msg.from_user_id}`] = msg.context_token!
+        if (next.health) {
+          next.health.updatedAt = now
+          next.health.lastInboundAt = now
+        }
+      })
+      void handleMessage({
+        opts,
+        sdk,
+        token: cred.token,
+        baseUrl: cred.baseUrl,
+        accountId: cred.accountId,
+        ownerUserId: cred.userId,
+        msg,
+        text,
+        session,
+      }).catch((error) => {
         opts.log(`消息处理失败: ${error instanceof Error ? error.message : error}`)
-      }
+      })
     }
   }
+  await interruptAll(sdk)
   process.off("SIGINT", stop)
   process.off("SIGTERM", stop)
+  const last = readState().health
+  if (last?.status !== "expired" && last?.pid === process.pid) health("stopped")
   opts.log("桥已停止")
 }
 
@@ -97,16 +197,12 @@ async function handleMessage(args: {
   accountId: string
   ownerUserId: string
   msg: WeixinMessage
-  text: string
+  text?: string
+  session: SessionFn
 }) {
-  const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, text } = args
+  const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, text, session } = args
   const userKey = `${accountId}#${msg.from_user_id}`
   const state = readState()
-
-  // 缓存会话上下文令牌
-  state.contexts = state.contexts ?? {}
-  state.contexts[userKey] = msg.context_token!
-  writeState(state)
 
   // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
   const ctxToken = msg.context_token!
@@ -115,6 +211,12 @@ async function handleMessage(args: {
     for (let i = 0; i < 2; i++) {
       try {
         await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: ctxToken, text: replyText, clientId })
+        updateState((next) => {
+          if (next.health) {
+            next.health.updatedAt = new Date().toISOString()
+            next.health.lastOutboundAt = next.health.updatedAt
+          }
+        })
         return
       } catch (error) {
         opts.log(`发送失败(第${i + 1}次): ${error instanceof Error ? error.message : error}`)
@@ -123,34 +225,18 @@ async function handleMessage(args: {
     }
   }
 
+  if (!text) {
+    await reply(t("unsupported"))
+    return
+  }
+
   // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
   state.models = state.models ?? {}
   const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split("/")
   const defaultModel = defaultID ? { id: defaultID, providerID: defaultProvider } : undefined
   const model = state.models[userKey] ?? state.model ?? defaultModel
 
-  // 会话映射: 每个微信用户一个 opencode 会话
-  state.sessions = state.sessions ?? {}
-  let sessionID = state.sessions[userKey]
-  if (!sessionID) {
-    const res = (await sdk.v2.session.create({
-      location: { directory: opts.dir },
-      model,
-    })) as {
-      data?: { data?: { id?: string } }
-    }
-    const id = res.data?.data?.id
-    if (!id) {
-      await reply(t("noSession"))
-      return
-    }
-    sessionID = id
-    state.sessions[userKey] = sessionID
-    writeState(state)
-    await reply(t("created"))
-  }
-
-  // 聊天指令(通道无关核心, 仅 owner 可操作后台常驻)
+  // 聊天指令优先处理; /help、/autostart 等不再创建无用 AI 会话。
   if (
     await handleChatCommand({
       channel: "weixin",
@@ -168,10 +254,15 @@ async function handleMessage(args: {
           return res.data?.data ?? []
         },
         switchModel: async (next) => {
+          const ready = await session(userKey, next)
+          if (!ready) return false
           try {
-            await sdk.v2.session.switchModel({ sessionID, model: next })
-            state.models![userKey] = next
-            writeState(state)
+            await sdk.v2.session.switchModel({ sessionID: ready.id, model: next }, { throwOnError: true })
+            updateState((current) => {
+              if (current.credential?.token !== token) return
+              current.models = current.models ?? {}
+              current.models[userKey] = next
+            })
             return true
           } catch (error) {
             opts.log(`/model 切换失败: ${error instanceof Error ? error.message : error}`)
@@ -190,6 +281,13 @@ async function handleMessage(args: {
     return
   }
 
+  const ready = await session(userKey, model)
+  if (!ready) {
+    await reply(t("noSession"))
+    return
+  }
+  const sessionID = ready.id
+
   // 新消息打断正在运行的旧任务(通知由核心发出)
   if (isQueued(userKey)) {
     await interruptCurrent({ sdk, sessionID, reply, log: (m) => opts.log(m) })
@@ -197,6 +295,7 @@ async function handleMessage(args: {
 
   // 同一用户串行处理: 新消息在旧任务结束后执行
   await enqueue(userKey, async () => {
+    if (ready.created) await reply(t("created"))
     await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
     try {
       await deliverMessage({

@@ -16,6 +16,7 @@ export type BridgeModelInfo = {
 }
 
 export type BridgeModelRef = { id: string; providerID: string; variant?: string }
+type SdkOptions = { throwOnError?: boolean }
 
 export type BotSdk = {
   v2: {
@@ -23,12 +24,12 @@ export type BotSdk = {
       list(parameters?: { location?: { directory?: string; workspace?: string } }): Promise<unknown>
     }
     session: {
-      create(parameters?: { id?: string; agent?: string; role?: string; model?: { id: string; providerID: string; variant?: string }; location?: { directory?: string; workspace?: string } }): Promise<unknown>
-      prompt(parameters: { sessionID: string; id?: string; prompt?: { text: string }; delivery?: "steer" | "queue" }): Promise<unknown>
-      switchModel(parameters: { sessionID: string; model: BridgeModelRef }): Promise<unknown>
-      wait(parameters: { sessionID: string }): Promise<unknown>
-      interrupt(parameters: { sessionID: string }): Promise<unknown>
-      messages(parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" }): Promise<unknown>
+      create(parameters?: { id?: string; agent?: string; role?: string; model?: { id: string; providerID: string; variant?: string }; location?: { directory?: string; workspace?: string } }, options?: SdkOptions): Promise<unknown>
+      prompt(parameters: { sessionID: string; id?: string; prompt?: { text: string }; delivery?: "steer" | "queue" }, options?: SdkOptions): Promise<unknown>
+      switchModel(parameters: { sessionID: string; model: BridgeModelRef }, options?: SdkOptions): Promise<unknown>
+      wait(parameters: { sessionID: string }, options?: SdkOptions): Promise<unknown>
+      interrupt(parameters: { sessionID: string }, options?: SdkOptions): Promise<unknown>
+      messages(parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" }, options?: SdkOptions): Promise<unknown>
     }
   }
 }
@@ -49,8 +50,8 @@ const MODEL_TIMEOUT_MS = Number(process.env.LYCHEE_MODEL_TIMEOUT_MS ?? 600_000)
 // 运行中提醒间隔(默认 5 分钟); 可用 LYCHEE_WORK_REMINDER_MS 覆盖
 const WORK_REMINDER_MS = Number(process.env.LYCHEE_WORK_REMINDER_MS ?? 300_000)
 // 流式转发的最小发文字数: 每轮轮询(2s)攒够就发一条增量, 用户可实时看到模型打字
-// 微信等无"编辑消息"能力的渠道只能分片: 4 字最实时, 调大(如 60)则消息更整、更少刷屏
-const MIN_STREAM_LEN = Number(process.env.LYCHEE_STREAM_MIN_CHARS ?? 4)
+// 微信等无"编辑消息"能力的渠道只能分片: 默认攒 80 字, 避免产生大量零碎气泡
+const MIN_STREAM_LEN = Number(process.env.LYCHEE_STREAM_MIN_CHARS ?? 80)
 const MAX_ATTEMPTS = 3
 
 type RunState = {
@@ -60,6 +61,7 @@ type RunState = {
   abortedByUser: boolean
   streamed: string
   pending: string
+  polling: boolean
 }
 
 const runState = new Map<string, RunState>()
@@ -92,10 +94,18 @@ function sleep(ms: number) {
 
 async function safeInterrupt(v2: V2Session, sessionID: string) {
   try {
-    await v2.interrupt({ sessionID })
+    await v2.interrupt({ sessionID }, { throwOnError: true })
   } catch (error) {
     // interrupt 是尽力而为; 失败时等 server 自己停
   }
+}
+
+export async function interruptAll(sdk: BotSdk): Promise<void> {
+  const active = [...runState.entries()].filter(([, state]) => state.running)
+  active.forEach(([, state]) => {
+    state.abortedByUser = true
+  })
+  await Promise.all(active.map(([sessionID]) => safeInterrupt(sdk.v2.session, sessionID)))
 }
 
 type AssistantMessage = {
@@ -112,7 +122,7 @@ function rowsOf(res: unknown): AssistantMessage[] {
 }
 
 async function lastAssistant(v2: V2Session, sessionID: string): Promise<AssistantMessage | undefined> {
-  const res = await v2.messages({ sessionID, limit: 10, order: "desc" }).catch(() => undefined)
+  const res = await v2.messages({ sessionID, limit: 10, order: "desc" }, { throwOnError: true }).catch(() => undefined)
   if (!res) return undefined
   const rows = rowsOf(res).filter((row) => row.type === "assistant")
   return rows[0]
@@ -131,12 +141,19 @@ async function flushPending(state: RunState, stream: (text: string) => Promise<v
   const chunk = state.pending
   if (!chunk) return
   state.pending = ""
-  await stream(chunk)
+  try {
+    await stream(chunk)
+  } catch (error) {
+    state.pending = chunk + state.pending
+    throw error
+  }
   log(`📤 流式已发 (${chunk.length} 字)`)
 }
 
 // 轮询一次: 更新"当前运行"信息 + 流式转发模型已生成的新文本
 async function poll(v2: V2Session, sessionID: string, state: RunState, stream: (text: string) => Promise<void>, log: (msg: string) => void) {
+  if (state.polling) return
+  state.polling = true
   try {
     const assistant = await lastAssistant(v2, sessionID)
     if (!assistant) return
@@ -165,6 +182,8 @@ async function poll(v2: V2Session, sessionID: string, state: RunState, stream: (
     if (state.pending.length >= MIN_STREAM_LEN) await flushPending(state, stream, log)
   } catch (error) {
     log(`轮询失败: ${error instanceof Error ? error.message : error}`)
+  } finally {
+    state.polling = false
   }
 }
 
@@ -194,7 +213,7 @@ async function waitIdle(
   void poll(v2, sessionID, state, stream, log)
   try {
     const outcome = await Promise.race([
-      v2.wait({ sessionID }).then(() => "idle" as const),
+      v2.wait({ sessionID }, { throwOnError: true }).then(() => "idle" as const),
       sleep(MODEL_TIMEOUT_MS).then(() => "timeout" as const),
     ])
     return outcome
@@ -230,11 +249,11 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     await sleep(500)
   }
 
-  const state: RunState = { running: true, info: t("thinking"), abortedByUser: false, streamed: "", pending: "" }
+  const state: RunState = { running: true, info: t("thinking"), abortedByUser: false, streamed: "", pending: "", polling: false }
   runState.set(sessionID, state)
   // 钉死模型: session 级 model 不持久, 每次处理前切一次(失败不阻塞, 只用默认)
   if (args.model) {
-    await v2.switchModel({ sessionID, model: args.model }).catch(() => {})
+    await v2.switchModel({ sessionID, model: args.model }, { throwOnError: true }).catch(() => {})
   }
   log(`🤖 开始处理 (${sessionID}): ${text.slice(0, 20)}…`)
   await notify(t("started"))
@@ -247,7 +266,7 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
       state.pending = ""
       let admitted
       try {
-        admitted = await v2.prompt({ sessionID, id: promptID, prompt: { text } })
+        admitted = await v2.prompt({ sessionID, id: promptID, prompt: { text } }, { throwOnError: true })
       } catch (error) {
         log(`prompt 出错: ${error instanceof Error ? error.message : error}`)
         await reply(t("error"))

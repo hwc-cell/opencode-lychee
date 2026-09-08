@@ -69,11 +69,11 @@ export async function pollQr(qrcode: string, baseUrl = DEFAULT_BASE, signal?: Ab
 /** 长轮询扫码状态直到 confirmed / expired; onStage 用于打印进度 */
 export async function loginUntilConfirmed(opts: {
   onStage?: (stage: QrStage) => void
-  onQr?: (qr: { qrcode: string; qrcode_img_content: string }) => void
+  onQr?: (qr: { qrcode: string; qrcode_img_content: string }) => void | Promise<void>
   signal?: AbortSignal
 }): Promise<{ token: string; botId: string; userId: string; baseUrl: string }> {
   let qr = await getQr()
-  opts.onQr?.(qr)
+  await opts.onQr?.(qr)
   let baseUrl = DEFAULT_BASE
   let refreshCount = 0
   for (;;) {
@@ -98,10 +98,10 @@ export async function loginUntilConfirmed(opts: {
     if (stage.status === "expired") {
       // 二维码 150s 过期: 自动换新码继续等(最多 3 次)
       refreshCount += 1
-      if (refreshCount > 3) throw new Error("二维码连续过期, 请重新运行 lychee weixin login")
+      if (refreshCount > 3) throw new Error("二维码连续过期, 请重新运行 OpenCode-Lychee weixin login")
       qr = await getQr()
       baseUrl = DEFAULT_BASE
-      opts.onQr?.(qr)
+      await opts.onQr?.(qr)
       opts.onStage?.({ status: "wait" })
       continue
     }
@@ -126,10 +126,27 @@ export type WeixinMessage = {
   to_user_id?: string
   create_time_ms?: number
   session_id?: string
+  group_id?: string
   message_type?: number
   message_state?: number
   context_token?: string
-  item_list?: Array<{ type?: number; text_item?: { text?: string } }>
+  item_list?: Array<{
+    type?: number
+    text_item?: { text?: string }
+    voice_item?: { text?: string }
+    image_item?: unknown
+    file_item?: unknown
+    video_item?: unknown
+  }>
+}
+
+/** 合并一条消息里的文字片段; 语音仅在微信提供转写时可用。 */
+export function messageText(msg: WeixinMessage): string | undefined {
+  const text = msg.item_list
+    ?.filter((item) => item.type === 1 && item.text_item?.text)
+    .map((item) => item.text_item!.text!)
+    .join("\n")
+  return text || msg.item_list?.find((item) => item.type === 3)?.voice_item?.text || undefined
 }
 
 export async function getUpdates(opts: {
