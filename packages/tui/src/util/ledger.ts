@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -37,16 +37,33 @@ export function getLedgerKey(): string | undefined {
 export function setLedgerKey(key: string) {
   cachedKey = key.trim()
   mkdirSync(join(homedir(), ".local", "state", "opencode"), { recursive: true })
-  writeFileSync(KEY_FILE, JSON.stringify({ apiKey: cachedKey }, null, 2))
+  writeFileSync(KEY_FILE, JSON.stringify({ apiKey: cachedKey }, null, 2), { mode: 0o600 })
+  chmodSync(KEY_FILE, 0o600)
+}
+
+export function ledgerClientID(sessionID: string): number {
+  let hash = 0xcbf29ce484222325n
+  for (let i = 0; i < sessionID.length; i++) {
+    hash ^= BigInt(sessionID.charCodeAt(i))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return Number(hash & 0x1fffffffffffffn)
+}
+
+export function localDate(date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 // 会话成本换算为人民币记录 (负数为支出)
-export function buildSessionRecord(args: { title: string; costUSD: number }): LedgerRecord | undefined {
+export function buildSessionRecord(args: { sessionID: string; title: string; costUSD: number }): LedgerRecord | undefined {
   if (args.costUSD <= 0) return undefined
   const amount = -Math.round(args.costUSD * 7.25 * 100) / 100
   return {
-    client_id: Date.now(),
-    date: new Date().toISOString().slice(0, 10),
+    client_id: ledgerClientID(args.sessionID),
+    date: localDate(),
     category: "AI工具",
     amount,
     note: args.title,
@@ -64,6 +81,7 @@ export async function ledgerUpload(
       method: "POST",
       headers: { "X-API-Key": key, "Content-Type": "application/json" },
       body: JSON.stringify({ device_id: "opencode-lychee", records }),
+      signal: AbortSignal.timeout(15_000),
     })
     if (res.status === 401 || res.status === 403) {
       return { ok: false, reason: "invalid-key", message: "API Key 无效或已失效" }
@@ -80,7 +98,10 @@ export async function ledgerUpload(
 
 export async function ledgerValidateKey(key: string): Promise<boolean> {
   try {
-    const res = await fetch(`${HOST}/api/v1/ledger/sync/all`, { headers: { "X-API-Key": key.trim() } })
+    const res = await fetch(`${HOST}/api/v1/ledger/sync/all`, {
+      headers: { "X-API-Key": key.trim() },
+      signal: AbortSignal.timeout(15_000),
+    })
     return res.status === 200
   } catch {
     return false

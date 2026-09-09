@@ -17,7 +17,11 @@ let home = FileManager.default.homeDirectoryForCurrentUser.path
 let stateDir = "\(home)/.local/state/opencode"
 let statePath = "\(stateDir)/voice.json"
 let audioPath = "\(NSTemporaryDirectory())lychee-dictate.wav"
-let modelPath = "\(home)/.local/share/opencode/whisper/ggml-base.bin"
+let modelConfigPath = "\(stateDir)/voice-model.txt"
+let configuredModel = (try? String(contentsOfFile: modelConfigPath, encoding: .utf8))?
+  .trimmingCharacters(in: .whitespacesAndNewlines) ?? "base"
+let modelName = ["tiny", "base", "small"].contains(configuredModel) ? configuredModel : "base"
+let modelPath = "\(home)/.local/share/opencode/whisper/ggml-\(modelName).bin"
 
 // MARK: - 状态文件
 
@@ -92,11 +96,11 @@ func findWhisper() -> String? {
 
 func transcribe() {
   guard FileManager.default.fileExists(atPath: audioPath), FileManager.default.fileExists(atPath: modelPath) else {
-    writeState(["state": "error", "message": "模型未安装,请运行: lychee voice install"])
+    writeState(["state": "error", "message": "模型未安装,请运行: OpenCode-Lychee voice install"])
     return
   }
   guard let whisper = findWhisper() else {
-    writeState(["state": "error", "message": "未找到 whisper-cli,请运行: lychee voice install"])
+    writeState(["state": "error", "message": "未找到 whisper-cli,请运行: OpenCode-Lychee voice install"])
     return
   }
   print("🧠 transcribing…")
@@ -206,7 +210,7 @@ func runStopMode() {
 // MARK: - main
 
 let recorder = Recorder()
-// 探针模式: lychee voice authorize 用来轮询授权状态 (已授权退出码 0)
+// 探针模式: OpenCode-Lychee voice authorize 用来轮询授权状态 (已授权退出码 0)
 if CommandLine.arguments.contains("--check") {
   exit(AXIsProcessTrusted() ? 0 : 1)
 }

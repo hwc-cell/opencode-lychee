@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { spawn, spawnSync } from "node:child_process"
@@ -9,14 +9,29 @@ import { UI } from "../ui"
 // 状态文件 ~/.local/state/opencode/voice.json, TUI 轮询后自动填入输入框。
 
 const BIN = join(homedir(), ".local", "bin", "lychee-dictate")
-const WHISPER_MODEL = "ggml-base.bin"
 const MODEL_DIR = join(homedir(), ".local", "share", "opencode", "whisper")
-const MODEL_PATH = join(MODEL_DIR, WHISPER_MODEL)
+const MODEL_CONFIG = join(homedir(), ".local", "state", "opencode", "voice-model.txt")
 
 const MODEL_URLS: Record<string, string> = {
   tiny: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
   base: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
   small: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+}
+
+function modelName(value: string): keyof typeof MODEL_URLS {
+  return value === "tiny" || value === "small" ? value : "base"
+}
+
+function modelPath(value: string): string {
+  return join(MODEL_DIR, `ggml-${modelName(value)}.bin`)
+}
+
+function selectedModel(): keyof typeof MODEL_URLS {
+  try {
+    return modelName(readFileSync(MODEL_CONFIG, "utf8").trim())
+  } catch {
+    return "base"
+  }
 }
 
 // huggingface 连不上时走镜像(hf-mirror.com)
@@ -59,7 +74,7 @@ export const VoiceCommand: CommandModule = {
 // 一键授权: 打开设置并轮询检测, 授权成功自动启动
 async function handleAuthorize() {
   if (!existsSync(BIN)) {
-    UI.println("❌ 未安装, 先运行: lychee voice install")
+    UI.println("❌ 未安装, 先运行: OpenCode-Lychee voice install")
     return
   }
   // 重新签名, 保证 TCC 记录匹配的是当前二进制
@@ -78,7 +93,7 @@ async function handleAuthorize() {
     }
     if (i % 5 === 4) UI.println(`…还在等待授权 (${Math.round((i + 1) * 2)}s)`)
   }
-  UI.println("❌ 等待超时。请确认设置里开关是开的; 若仍然不行, 重启电脑后重试: lychee voice authorize")
+  UI.println("❌ 等待超时。请确认设置里开关是开的; 若仍然不行, 重启电脑后重试: OpenCode-Lychee voice authorize")
 }
 
 function cmd(cmdline: string, args: string[]) {
@@ -104,25 +119,31 @@ async function handleInstall(model: string) {
     UI.println(`✅ whisper-cli: ${whisper}`)
   }
   // 2. 转写模型
-  if (!existsSync(MODEL_PATH)) {
-    const url = MODEL_URLS[model] ?? MODEL_URLS.base
-    UI.println(`• 下载模型 ${WHISPER_MODEL.replace("ggml-", "")}…`)
+  const chosen = modelName(model)
+  const chosenPath = modelPath(chosen)
+  if (!existsSync(chosenPath)) {
+    const url = MODEL_URLS[chosen]
+    UI.println(`• 下载模型 ${chosen}…`)
     cmd("mkdir", ["-p", MODEL_DIR])
-    let res = spawnSync("curl", ["-L", "--fail", "--connect-timeout", "20", url, "-o", MODEL_PATH], { stdio: "ignore" })
+    let res = spawnSync("curl", ["-L", "--fail", "--connect-timeout", "20", url, "-o", chosenPath], { stdio: "ignore" })
     if (res.status !== 0) {
       UI.println("• 官方源超时, 尝试镜像…")
-      res = spawnSync("curl", ["-L", "--fail", "--connect-timeout", "20", mirrorUrl(url), "-o", MODEL_PATH], { stdio: "ignore" })
+      res = spawnSync("curl", ["-L", "--fail", "--connect-timeout", "20", mirrorUrl(url), "-o", chosenPath], { stdio: "ignore" })
     }
-    if (res.status === 0 && existsSync(MODEL_PATH)) {
-      UI.println(`✅ 模型: ${MODEL_PATH}`)
+    if (res.status === 0 && existsSync(chosenPath)) {
+      UI.println(`✅ 模型: ${chosenPath}`)
     } else {
-      UI.println("⚠️ 模型下载失败(可稍后手动下载, 放至上述路径): lychee voice install")
+      UI.println("⚠️ 模型下载失败(可稍后重试): OpenCode-Lychee voice install")
     }
   } else {
-    UI.println(`✅ 模型: ${MODEL_PATH}`)
+    UI.println(`✅ 模型: ${chosenPath}`)
+  }
+  if (existsSync(chosenPath)) {
+    cmd("mkdir", ["-p", join(homedir(), ".local", "state", "opencode")])
+    writeFileSync(MODEL_CONFIG, `${chosen}\n`)
   }
   // 3. 编译 lychee-dictate
-  const source = join(process.cwd(), "src", "..", "..", "tui", "lychee-dictate.swift")
+  const source = join(import.meta.dir, "..", "..", "..", "..", "tui", "lychee-dictate.swift")
   const found = [source, join(homedir(), ".local", "bin", "lychee-dictate.swift"), "/tmp/lychee-dictate.swift"].find((p) => existsSync(p))
   if (!found) {
     UI.println("❌ 找不到 lychee-dictate.swift 源码(需在仓库内运行)")
@@ -151,7 +172,7 @@ async function handleInstall(model: string) {
 
 async function handleStart() {
   if (!existsSync(BIN)) {
-    UI.println("❌ 未安装, 先运行: lychee voice install")
+    UI.println("❌ 未安装, 先运行: OpenCode-Lychee voice install")
     return
   }
   UI.println("• 启动 lychee-dictate…")
@@ -161,7 +182,7 @@ async function handleStart() {
   const st = readVoiceStatus()
   if (st?.state === "error") {
     UI.println(`⚠️ 启动失败: ${st.message ?? "未知原因"}`)
-    UI.println("· 请到 系统设置 > 隐私与安全 > 辅助功能 勾选 lychee-dictate, 然后重试: lychee voice start")
+    UI.println("· 请到 系统设置 > 隐私与安全 > 辅助功能 勾选 lychee-dictate, 然后重试: OpenCode-Lychee voice start")
     UI.println("· 若列表里没有 lychee-dictate, 点 + 添加: ~/.local/bin/lychee-dictate")
     return
   }
@@ -195,14 +216,15 @@ function handleStatus() {
   }
   UI.println(`状态: ${status.state}${status.text ? ` — ${status.text}` : ""}${status.message ? ` — ${status.message}` : ""}`)
   if (status.state === "error") {
-    UI.println("提示: 运行 lychee voice start 会重新启动并再次尝试打开授权设置")
+    UI.println("提示: 运行 OpenCode-Lychee voice start 会重新启动并再次尝试打开授权设置")
   }
 }
 
 function handleTest() {
   // 不弹权限窗口的轻量自检: 工具存在性 + 模型 + whisper
+  const model = selectedModel()
   UI.println("🍈 语音输入自检:")
-  UI.println(`· lychee-dictate: ${existsSync(BIN) ? "✅" : "❌(先 lychee voice install)"}`)
+  UI.println(`· lychee-dictate: ${existsSync(BIN) ? "✅" : "❌(先 OpenCode-Lychee voice install)"}`)
   UI.println(`· whisper-cli: ${whisperCliPath() ? "✅" : "❌(brew install whisper-cpp)"}`)
-  UI.println(`· 模型: ${existsSync(MODEL_PATH) ? "✅" : "❌(lychee voice install 会下载)"}`)
+  UI.println(`· 模型(${model}): ${existsSync(modelPath(model)) ? "✅" : "❌(OpenCode-Lychee voice install 会下载)"}`)
 }

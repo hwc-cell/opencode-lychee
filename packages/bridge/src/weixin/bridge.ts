@@ -22,6 +22,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 type Session = { id: string; created: boolean }
 type SessionFn = (key: string, model?: BridgeModelRef) => Promise<Session | undefined>
 
+function statusCode(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return
+  const direct = (error as { status?: unknown }).status
+  if (typeof direct === "number") return direct
+  const cause = (error as { cause?: unknown }).cause
+  if (!cause || typeof cause !== "object") return
+  const status = (cause as { status?: unknown }).status
+  return typeof status === "number" ? status : undefined
+}
+
 function health(status: NonNullable<ReturnType<typeof readState>["health"]>["status"], error?: string) {
   const now = new Date().toISOString()
   updateState((state) => {
@@ -50,13 +60,12 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       const stored = readState().sessions?.[key]
       if (stored && checked.has(stored)) return { id: stored, created: false }
       if (stored) {
-        const valid = await sdk.v2.session.messages({ sessionID: stored, limit: 1, order: "desc" }, { throwOnError: true }).then(
-          () => true,
-          () => false,
-        )
-        if (valid) {
+        try {
+          await sdk.v2.session.messages({ sessionID: stored, limit: 1, order: "desc" }, { throwOnError: true })
           checked.add(stored)
           return { id: stored, created: false }
+        } catch (error) {
+          if (statusCode(error) !== 404) throw error
         }
         updateState((next) => {
           if (next.sessions?.[key] === stored) delete next.sessions[key]
@@ -101,6 +110,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   let timeout = 45_000
   // getupdates 可能重复推送, 按消息 id 去重
   const processed = new Set<string>()
+  const handlers = new Set<Promise<void>>()
   opts.log(`微信 Bot 已启动 (${cred.accountId}), 等待消息… (Ctrl+C 停止)`)
 
   while (running) {
@@ -166,7 +176,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
           next.health.lastInboundAt = now
         }
       })
-      void handleMessage({
+      const task = handleMessage({
         opts,
         sdk,
         token: cred.token,
@@ -179,9 +189,12 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       }).catch((error) => {
         opts.log(`消息处理失败: ${error instanceof Error ? error.message : error}`)
       })
+      handlers.add(task)
+      void task.finally(() => handlers.delete(task))
     }
   }
   await interruptAll(sdk)
+  await Promise.race([Promise.allSettled([...handlers]), sleep(10_000)])
   process.off("SIGINT", stop)
   process.off("SIGTERM", stop)
   const last = readState().health
@@ -248,7 +261,7 @@ async function handleMessage(args: {
       log: (m) => opts.log(m),
       models: {
         list: async () => {
-          const res = (await sdk.v2.model.list({ location: { directory: opts.dir } })) as {
+          const res = (await sdk.v2.model.list({ location: { directory: opts.dir } }, { throwOnError: true })) as {
             data?: { data?: BridgeModelInfo[] }
           }
           return res.data?.data ?? []

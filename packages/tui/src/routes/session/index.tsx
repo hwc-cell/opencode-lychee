@@ -216,7 +216,7 @@ export function Session() {
       if (!kv.get("lychee_summary", false)) return
       const latest = sync.data.message[sessionID] ?? []
       if (latest.length === 0) return
-      process.stderr.write("\n⏳ 荔枝小结生成中…\n")
+      process.stderr.write(`\n${t("summary.generating")}\n`)
       try {
         const file = await generateSessionSummary({
           sdk,
@@ -227,9 +227,11 @@ export function Session() {
           messages: latest,
         })
         if (file) {
-          process.stderr.write(`🍈 荔枝小结已保存: ${file}\n`)
-        } else process.stderr.write("⚠️ 荔枝小结生成失败(未获得总结)\n")      } catch (error) {
-        process.stderr.write(`⚠️ 荔枝小结生成失败: ${errorMessage(error)}\n`)      }
+          process.stderr.write(`${t("summary.saved", { file })}\n`)
+        } else process.stderr.write(`${t("summary.noReply")}\n`)
+      } catch (error) {
+        process.stderr.write(`${t("summary.failed", { error: errorMessage(error) })}\n`)
+      }
     }
     addExitHook("summary", hook)
   })
@@ -240,22 +242,20 @@ export function Session() {
     if (!current) return
     const hook = async () => {
       if (!kv.get("autolychee", false)) return
-      const record = buildSessionRecord({ title: current.title, costUSD: current.cost ?? 0 })
+      const record = buildSessionRecord({ sessionID, title: current.title, costUSD: current.cost ?? 0 })
       if (!record) return
-      process.stderr.write("\n⏳ 自动记账中…\n")
+      process.stderr.write(`\n${t("ledger.uploading")}\n`)
       const result = await ledgerUpload([record])
       if (result.ok) {
-        process.stderr.write(`💸 已自动记账: ¥${(-record.amount).toFixed(2)} (${record.category} · ${record.note})\n`)
+        process.stderr.write(
+          `${t("ledger.booked", { amount: (-record.amount).toFixed(2), category: record.category, note: record.note })}\n`,
+        )
       } else if (result.reason === "no-key") {
-        process.stderr.write(
-          "⚠️ 自动记账失败: 未设置 API Key。\n   请到荔枝记账「设置 → API 访问密钥」生成 Key, 然后复制后输入 /ledger-key 保存。\n",
-        )
+        process.stderr.write(`${t("ledger.noKey")}\n`)
       } else if (result.reason === "invalid-key") {
-        process.stderr.write(
-          `⚠️ 自动记账失败: ${result.message}。\n   请到荔枝记账「设置 → API 访问密钥」重新生成, 再用 /ledger-key 更新。\n`,
-        )
+        process.stderr.write(`${t("ledger.invalidKey", { message: result.message })}\n`)
       } else {
-        process.stderr.write(`⚠️ 自动记账失败: ${result.message}\n`)
+        process.stderr.write(`${t("ledger.failed", { message: result.message })}\n`)
       }
     }
     addExitHook("autolychee", hook)

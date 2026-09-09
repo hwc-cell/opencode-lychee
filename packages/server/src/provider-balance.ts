@@ -37,15 +37,16 @@ const REGISTRY: Record<string, BalanceDef> = {
       }
     },
   },
-  // https://openrouter.ai/docs/api-reference/limits
+  // https://openrouter.ai/docs/api/api-reference/credits/get-credits
   openrouter: {
     url: "https://openrouter.ai/api/v1/credits",
     env: "OPENROUTER_API_KEY",
     parse: (json) => {
       const data = json.data as Record<string, unknown> | undefined
-      const limit = data?.limit
-      if (limit == null) return
-      return { currency: "USD", amount: String(limit) }
+      const total = Number(data?.total_credits)
+      const used = Number(data?.total_usage)
+      if (!Number.isFinite(total) || !Number.isFinite(used)) return
+      return { currency: "USD", amount: Math.max(0, total - used).toFixed(2) }
     },
   },
   // https://docs.siliconflow.com/api-reference/userinfo/get-user-info
@@ -67,7 +68,7 @@ const REGISTRY: Record<string, BalanceDef> = {
         if (!obj) return
         for (const key of ["total_balance", "balance", "amount", "total", "available", "total_amount"]) {
           const value = obj[key]
-          if (value != null && typeof value === "number" || typeof value === "string") return [key, String(value)] as const
+          if (value != null && (typeof value === "number" || typeof value === "string")) return [key, String(value)] as const
         }
       }
       const found = pick(data) ?? pick(json)
@@ -75,21 +76,11 @@ const REGISTRY: Record<string, BalanceDef> = {
       return { currency: "CNY", amount: found[1] }
     },
   },
-  // OpenAI credit grants 接口返回单位为美分
-  openai: {
-    url: "https://api.openai.com/dashboard/billing/credit_grants",
-    env: "OPENAI_API_KEY",
-    parse: (json) => {
-      const cents = json.total_available
-      if (cents == null) return
-      return { currency: "USD", amount: (Number(cents) / 100).toFixed(2) }
-    },
-  },
 }
 
 function authFilePath(): string {
-  // 与 opencode 的 ~/.local/share/opencode/auth.json 一致
-  return join(homedir(), ".local", "share", "opencode", "auth.json")
+  const data = process.env.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share")
+  return join(data, "opencode", "auth.json")
 }
 
 async function readAuthEntry(providerID: string): Promise<AuthEntry | undefined> {

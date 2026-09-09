@@ -1067,7 +1067,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       route.navigate({ type: "home" })
       toast.show({
         variant: "info",
-        message: "The current session was deleted",
+        message: t("session.currentDeleted"),
       })
     }
   })
@@ -1094,9 +1094,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
     const choice = await DialogConfirm.show(
       dialog,
-      `Update Available`,
-      `A new release v${version} is available. Would you like to update now?`,
-      "skip",
+      t("update.availableTitle"),
+      t("update.availableBody", { version }),
+      t("update.skip"),
     )
 
     if (choice === false) {
@@ -1108,7 +1108,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
     toast.show({
       variant: "info",
-      message: `Updating to v${version}…`,
+      message: t("update.updating", { version }),
       duration: 30000,
     })
 
@@ -1118,7 +1118,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       toast.show({
         variant: "error",
         title: t("cmd.updateFailed"),
-        message: "Update failed",
+        message: t("update.failed"),
         duration: 10000,
       })
       return
@@ -1126,8 +1126,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
     await DialogAlert.show(
       dialog,
-      "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
+      t("update.completeTitle"),
+      t("update.completeBody", { version: result.data.version }),
     )
 
     void exit()

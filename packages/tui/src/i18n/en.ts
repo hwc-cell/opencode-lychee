@@ -1,6 +1,6 @@
 import type { Dict } from "./types"
 
-export const dict: Dict = {
+export const dict = {
   // Tips
   "tips.label": "Tip",
   "tips.noModels": "Run {highlight}/connect{/highlight} to add an AI provider and start coding",
@@ -118,7 +118,39 @@ export const dict: Dict = {
   "question.submitAnswer": "Submit answer",
   "question.confirm": "Confirm",
   "question.selectAnswer": "Toggle answer option",
-  "question.toggle.desc": "切换答案选项",
+  "question.toggle.desc": "Toggle answer option",
+  "question.customAnswer": "Type your own answer",
+  "question.review": "Review",
+  "question.unanswered": "(not answered)",
+  "question.tab": "tab",
+  "question.select": "select",
+  "question.submit": "submit",
+  "question.toggle": "toggle",
+  "question.dismiss": "dismiss",
+
+  // Model dialog
+  "model.free": "Free",
+  "model.favorites": "Favorites",
+  "model.recent": "Recent",
+  "model.favorite": "Favorite",
+  "model.popularProviders": "Popular providers",
+  "model.select": "Select model",
+  "model.viewAllProviders": "View all providers",
+
+  // Export options
+  "export.title": "Export Options",
+  "export.filename": "Filename:",
+  "export.filenamePlaceholder": "Enter filename",
+  "export.includeThinking": "Include thinking",
+  "export.includeToolDetails": "Include tool details",
+  "export.includeAssistantMetadata": "Include assistant metadata",
+  "export.openWithoutSaving": "Open without saving",
+  "export.nextOption": "Next export option",
+  "export.toggleOption": "Toggle export option",
+  "export.press": "Press",
+  "export.toToggle": "to toggle,",
+  "export.toConfirm": "to confirm",
+  "export.forOptions": "for options",
 
   // Sidebar
   "sidebar.context": "Context",
@@ -192,6 +224,15 @@ export const dict: Dict = {
   "autolychee.busy": "Checking…",
   "summary.statusOn": "Summary:on",
   "summary.statusOff": "Summary:off",
+  "summary.generating": "⏳ Generating Lychee summary…",
+  "summary.saved": "🍈 Lychee summary saved: {file}",
+  "summary.noReply": "⚠️ Lychee summary failed (no response)",
+  "summary.failed": "⚠️ Lychee summary failed: {error}",
+  "ledger.uploading": "⏳ Recording session cost…",
+  "ledger.booked": "💸 Recorded: ¥{amount} ({category} · {note})",
+  "ledger.noKey": "⚠️ Auto bookkeeping failed: API key is not configured.\n   Generate one in Lychee Ledger at Settings → API access key, copy it, then run /ledger-key.",
+  "ledger.invalidKey": "⚠️ Auto bookkeeping failed: {message}.\n   Generate a new key in Lychee Ledger, then update it with /ledger-key.",
+  "ledger.failed": "⚠️ Auto bookkeeping failed: {message}",
   "help.title": "Help",
   "help.close.desc": "Close help",
   "help.press": "Press {shortcut} to see all available actions and commands in any context.",
@@ -203,6 +244,14 @@ export const dict: Dict = {
   "session.copyTranscriptFailed": "Failed to copy session transcript",
   "session.exportFailed": "Failed to export session",
   "session.thinking": "Thinking",
+  "session.currentDeleted": "The current session was deleted",
+  "update.availableTitle": "Update Available",
+  "update.availableBody": "A new release v{version} is available. Would you like to update now?",
+  "update.skip": "skip",
+  "update.updating": "Updating to v{version}…",
+  "update.failed": "Update failed",
+  "update.completeTitle": "Update Complete",
+  "update.completeBody": "Successfully updated to OpenCode v{version}. Please restart the application.",
   "session.thinkingTitle": "Thinking: {title}",
 
   // Command categories
@@ -294,7 +343,9 @@ export const dict: Dict = {
   "prompt.voiceFilled": "Transcribed and inserted",
   "prompt.voiceStatusBar": "⌘ to talk / Ctrl+R",
   "prompt.voiceNeedAuth": "needs authorization",
-}
+} satisfies Dict
+
+export type DictKey = keyof typeof dict
 
 export type Placeholders = { normal: string[]; shell: string[] }
 

@@ -1,6 +1,6 @@
-import type { Dict } from "./types"
+import type { DictKey } from "./en"
 
-export const dict: Dict = {
+export const dict: Record<DictKey, string> = {
   // Tips
   "tips.label": "提示",
   "tips.noModels": "运行 {highlight}/connect{/highlight} 添加 AI 供应商并开始编码",
@@ -117,8 +117,40 @@ export const dict: Dict = {
   "question.reject": "拒绝问题",
   "question.submitAnswer": "提交答案",
   "question.confirm": "确认",
-  "question.selectAnswer": "Toggle answer option",
+  "question.selectAnswer": "切换答案选项",
   "question.toggle.desc": "切换答案选项",
+  "question.customAnswer": "输入自定义答案",
+  "question.review": "检查答案",
+  "question.unanswered": "（未回答）",
+  "question.tab": "切换",
+  "question.select": "选择",
+  "question.submit": "提交",
+  "question.toggle": "切换选项",
+  "question.dismiss": "取消",
+
+  // Model dialog
+  "model.free": "免费",
+  "model.favorites": "收藏",
+  "model.recent": "最近使用",
+  "model.favorite": "收藏",
+  "model.popularProviders": "热门供应商",
+  "model.select": "选择模型",
+  "model.viewAllProviders": "查看全部供应商",
+
+  // Export options
+  "export.title": "导出选项",
+  "export.filename": "文件名:",
+  "export.filenamePlaceholder": "输入文件名",
+  "export.includeThinking": "包含思考过程",
+  "export.includeToolDetails": "包含工具详情",
+  "export.includeAssistantMetadata": "包含助手元数据",
+  "export.openWithoutSaving": "不保存，直接打开",
+  "export.nextOption": "切换到下一个导出选项",
+  "export.toggleOption": "切换导出选项",
+  "export.press": "按",
+  "export.toToggle": "切换，按",
+  "export.toConfirm": "确认",
+  "export.forOptions": "打开选项",
 
   // Sidebar
   "sidebar.context": "上下文",
@@ -169,7 +201,7 @@ export const dict: Dict = {
 
   // Help dialog
 
-  "cmd.summaryOn": "Enable lychee summary",
+  "cmd.summaryOn": "开启荔枝小结",
   "cmd.summaryOff": "关闭荔枝小结",
   "cmd.autolycheeOn": "开启自动记账",
   "cmd.autolycheeOff": "关闭自动记账",
@@ -192,6 +224,15 @@ export const dict: Dict = {
   "autolychee.busy": "校验中…",
   "summary.statusOn": "小结:开",
   "summary.statusOff": "小结:关",
+  "summary.generating": "⏳ 荔枝小结生成中…",
+  "summary.saved": "🍈 荔枝小结已保存: {file}",
+  "summary.noReply": "⚠️ 荔枝小结生成失败（未获得总结）",
+  "summary.failed": "⚠️ 荔枝小结生成失败: {error}",
+  "ledger.uploading": "⏳ 自动记账中…",
+  "ledger.booked": "💸 已自动记账: ¥{amount} ({category} · {note})",
+  "ledger.noKey": "⚠️ 自动记账失败: 未设置 API Key。\n   请到荔枝记账「设置 → API 访问密钥」生成 Key，复制后输入 /ledger-key 保存。",
+  "ledger.invalidKey": "⚠️ 自动记账失败: {message}。\n   请到荔枝记账「设置 → API 访问密钥」重新生成，再用 /ledger-key 更新。",
+  "ledger.failed": "⚠️ 自动记账失败: {message}",
   "help.title": "帮助",
   "help.close.desc": "关闭帮助",
   "help.press": "按 {shortcut} 可在任意上下文中查看所有可用的操作与命令。",
@@ -203,6 +244,14 @@ export const dict: Dict = {
   "session.copyTranscriptFailed": "复制会话记录失败",
   "session.exportFailed": "导出会话失败",
   "session.thinking": "思考中",
+  "session.currentDeleted": "当前会话已删除",
+  "update.availableTitle": "发现新版本",
+  "update.availableBody": "新版本 v{version} 已发布，是否立即更新？",
+  "update.skip": "跳过",
+  "update.updating": "正在更新到 v{version}…",
+  "update.failed": "更新失败",
+  "update.completeTitle": "更新完成",
+  "update.completeBody": "已成功更新到 OpenCode v{version}，请重启应用。",
   "session.thinkingTitle": "思考中：{title}",
 
   // Command categories

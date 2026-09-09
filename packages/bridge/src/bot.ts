@@ -21,7 +21,7 @@ type SdkOptions = { throwOnError?: boolean }
 export type BotSdk = {
   v2: {
     model: {
-      list(parameters?: { location?: { directory?: string; workspace?: string } }): Promise<unknown>
+      list(parameters?: { location?: { directory?: string; workspace?: string } }, options?: SdkOptions): Promise<unknown>
     }
     session: {
       create(parameters?: { id?: string; agent?: string; role?: string; model?: { id: string; providerID: string; variant?: string }; location?: { directory?: string; workspace?: string } }, options?: SdkOptions): Promise<unknown>
