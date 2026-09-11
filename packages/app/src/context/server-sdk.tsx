@@ -159,9 +159,22 @@ function currentDeltaFragment(event: CurrentDelta) {
   return event.type === "session.compaction.delta" ? event.data.text : event.data.delta
 }
 
-export function resumeStreamAfterPageShow(event: PageTransitionEvent, start: () => unknown) {
-  if (!event.persisted) return
+export function resumeStreamAfterPageShow(_event: PageTransitionEvent, start: () => unknown) {
   start()
+}
+
+export function resumeStreamAfterVisibilityChange(
+  visibilityState: DocumentVisibilityState,
+  stop: () => unknown,
+  start: () => unknown,
+) {
+  if (visibilityState !== "visible") return
+  stop()
+  start()
+}
+
+export function reconnectDelay(attempt: number) {
+  return Math.min(250 * 2 ** Math.max(0, attempt - 1), 30_000)
 }
 
 type ServerEventEmitter = ReturnType<typeof createGlobalEmitter<{ [key: string]: ServerEvent }>>
@@ -217,8 +230,6 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   type Queued = QueuedServerEvent
   const FLUSH_FRAME_MS = 16
   const STREAM_YIELD_MS = 8
-  const RECONNECT_DELAY_MS = 250
-
   let queue: Queued[] = []
   let buffer: Queued[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -256,6 +267,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   let run: Promise<void> | undefined
   let started = false
   let generation = 0
+  let reconnectAttempt = 0
 
   const start = () => {
     if (started) return run
@@ -280,6 +292,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
           let yielded = Date.now()
           for await (const event of events) {
             streamErrorLogged = false
+            reconnectAttempt = 0
             const legacy = "payload" in event
             if (legacy && event.payload.type === "sync") continue
             const directory = legacy ? (event.directory ?? "global") : (event.location?.directory ?? "global")
@@ -305,7 +318,8 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         }
 
         if (abort.signal.aborted || !started || generation !== active) return
-        await wait(RECONNECT_DELAY_MS)
+        reconnectAttempt++
+        await wait(reconnectDelay(reconnectAttempt))
       }
     })().finally(() => {
       if (run !== current) return
@@ -325,6 +339,9 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   onMount(() => {
     makeEventListener(window, "pagehide", stop)
     makeEventListener(window, "pageshow", (event) => resumeStreamAfterPageShow(event, start))
+    makeEventListener(document, "visibilitychange", () =>
+      resumeStreamAfterVisibilityChange(document.visibilityState, stop, start),
+    )
   })
 
   onCleanup(() => {

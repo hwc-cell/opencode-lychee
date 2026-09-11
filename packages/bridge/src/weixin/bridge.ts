@@ -1,6 +1,7 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { randomUUID } from "node:crypto"
 import { chunkText, getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
+import { conversationKey, messageKey, promptID } from "./keys"
 import { readState, updateState } from "./state"
 import { handleChatCommand } from "../commands"
 import { deliverMessage, enqueue, interruptAll, interruptCurrent, isQueued, type BotSdk, type BridgeModelInfo, type BridgeModelRef } from "../bot"
@@ -108,9 +109,44 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
 
   let cursor = state.cursor ?? ""
   let timeout = 45_000
-  // getupdates 可能重复推送, 按消息 id 去重
-  const processed = new Set<string>()
+  // getupdates 可能重复推送。inFlight 防止并发重复处理，completed 覆盖游标切换期间的短暂重复。
+  const inFlight = new Set<string>()
+  const completed = new Set<string>()
   const handlers = new Set<Promise<void>>()
+  const schedule = (key: string, msg: WeixinMessage) => {
+    if (inFlight.has(key) || completed.has(key)) return
+    inFlight.add(key)
+    const task = handleMessage({
+      opts,
+      sdk,
+      token: cred.token,
+      baseUrl: cred.baseUrl,
+      accountId: cred.accountId,
+      ownerUserId: cred.userId,
+      msg,
+      text: messageText(msg),
+      session,
+    })
+      .then(() => {
+        completed.add(key)
+        if (completed.size > 2000) completed.delete(completed.values().next().value!)
+        updateState((next) => {
+          if (next.credential?.token !== cred.token || !next.inbox) return
+          delete next.inbox[key]
+          if (Object.keys(next.inbox).length === 0) delete next.inbox
+        })
+      })
+      .catch((error) => {
+        opts.log(`消息处理失败, 已保留待重试 (${key}): ${error instanceof Error ? error.message : error}`)
+      })
+      .finally(() => {
+        inFlight.delete(key)
+        handlers.delete(task)
+      })
+    handlers.add(task)
+  }
+
+  for (const [key, msg] of Object.entries(state.inbox ?? {})) schedule(key, msg)
   opts.log(`微信 Bot 已启动 (${cred.accountId}), 等待消息… (Ctrl+C 停止)`)
 
   while (running) {
@@ -148,50 +184,35 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
     }
     health("online")
     if (resp.longpolling_timeout_ms) timeout = resp.longpolling_timeout_ms + 10_000
-    if (resp.get_updates_buf && resp.get_updates_buf !== cursor) {
-      cursor = resp.get_updates_buf
+    const incoming = (resp.msgs ?? []).filter(
+      (msg) => msg.message_type === 1 && Boolean(msg.from_user_id) && Boolean(msg.context_token),
+    )
+    const nextCursor = resp.get_updates_buf || cursor
+    if (nextCursor !== cursor || incoming.length > 0) {
       updateState((next) => {
         if (next.credential?.token !== cred.token) return
-        next.cursor = cursor
-      })
-    }
-    for (const msg of resp.msgs ?? []) {
-      if (msg.message_type !== 1) continue // 只处理用户消息
-      const msgKey = String(msg.message_id ?? msg.seq ?? "")
-      if (msgKey && processed.has(msgKey)) continue
-      if (msgKey) {
-        processed.add(msgKey)
-        if (processed.size > 2000) processed.delete(processed.values().next().value!)
-      }
-      const text = messageText(msg)
-      if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
-      if (!msg.from_user_id || !msg.context_token) continue
-      updateState((next) => {
-        if (next.credential?.token !== cred.token) return
-        const now = new Date().toISOString()
+        next.cursor = nextCursor
+        next.inbox = next.inbox ?? {}
         next.contexts = next.contexts ?? {}
-        next.contexts[`${cred.accountId}#${msg.from_user_id}`] = msg.context_token!
-        if (next.health) {
+        const now = new Date().toISOString()
+        for (const msg of incoming) {
+          const key = messageKey(cred.accountId, msg)
+          next.inbox[key] = next.inbox[key] ?? msg
+          next.contexts[conversationKey(cred.accountId, msg)] = msg.context_token!
+        }
+        if (incoming.length > 0 && next.health) {
           next.health.updatedAt = now
           next.health.lastInboundAt = now
         }
       })
-      const task = handleMessage({
-        opts,
-        sdk,
-        token: cred.token,
-        baseUrl: cred.baseUrl,
-        accountId: cred.accountId,
-        ownerUserId: cred.userId,
-        msg,
-        text,
-        session,
-      }).catch((error) => {
-        opts.log(`消息处理失败: ${error instanceof Error ? error.message : error}`)
-      })
-      handlers.add(task)
-      void task.finally(() => handlers.delete(task))
+      cursor = nextCursor
     }
+    for (const msg of incoming) {
+      const text = messageText(msg)
+      if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
+    }
+    // 只按持久化 inbox 的插入顺序调度，失败的旧消息不会被刚收到的新消息插队。
+    for (const [key, msg] of Object.entries(readState().inbox ?? {})) schedule(key, msg)
   }
   await interruptAll(sdk)
   await Promise.race([Promise.allSettled([...handlers]), sleep(10_000)])
@@ -214,7 +235,7 @@ async function handleMessage(args: {
   session: SessionFn
 }) {
   const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, text, session } = args
-  const userKey = `${accountId}#${msg.from_user_id}`
+  const userKey = conversationKey(accountId, msg)
   const state = readState()
 
   // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
@@ -224,16 +245,22 @@ async function handleMessage(args: {
     for (let i = 0; i < 2; i++) {
       try {
         await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: ctxToken, text: replyText, clientId })
-        updateState((next) => {
-          if (next.health) {
-            next.health.updatedAt = new Date().toISOString()
-            next.health.lastOutboundAt = next.health.updatedAt
-          }
-        })
+        try {
+          updateState((next) => {
+            if (next.health) {
+              next.health.updatedAt = new Date().toISOString()
+              next.health.lastOutboundAt = next.health.updatedAt
+            }
+          })
+        } catch (error) {
+          // 消息已经成功发出，健康状态落盘失败不能触发重发。
+          opts.log(`发送成功但状态保存失败: ${error instanceof Error ? error.message : error}`)
+        }
         return
       } catch (error) {
         opts.log(`发送失败(第${i + 1}次): ${error instanceof Error ? error.message : error}`)
         if (i === 1) throw error
+        await sleep(500)
       }
     }
   }
@@ -315,6 +342,7 @@ async function handleMessage(args: {
         sdk,
         sessionID,
         text,
+        promptID: promptID(accountId, msg),
         model,
         reply: async (replyText) => {
           const chunks = chunkText(replyText, 1990)

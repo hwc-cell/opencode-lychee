@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { deliverMessage, enqueue, isQueued, type BotSdk } from "../src/bot"
 import { handleChatCommand } from "../src/commands"
-import { chunkText, loginUntilConfirmed, messageText } from "../src/weixin/client"
+import { chunkText, loginUntilConfirmed, messageText, sendText, sendTyping } from "../src/weixin/client"
+import { conversationKey, messageKey } from "../src/weixin/keys"
 
 const fetch = globalThis.fetch
 
@@ -57,6 +58,70 @@ describe("queue", () => {
     expect(orders.every((order) => order === "desc")).toBe(true)
     expect(replies).toContain("latest")
   })
+
+  test("reconnects the wait call without submitting the prompt twice", async () => {
+    let prompts = 0
+    let waits = 0
+    const sdk = {
+      v2: {
+        model: { list: async () => [] },
+        session: {
+          create: async () => ({}),
+          prompt: async () => {
+            prompts++
+            return {}
+          },
+          switchModel: async () => ({}),
+          wait: async () => {
+            waits++
+            if (waits === 1) throw new Error("connection lost")
+            return {}
+          },
+          interrupt: async () => ({}),
+          messages: async () => ({
+            data: { data: [{ type: "assistant", content: [{ type: "text", text: "done" }] }] },
+          }),
+        },
+      },
+    } as BotSdk
+
+    await deliverMessage({ sdk, sessionID: "session", text: "hello", reply: async () => {}, log: () => {} })
+    expect(prompts).toBe(1)
+    expect(waits).toBe(2)
+  })
+
+  test("reuses the prompt id when admission has an ambiguous transport failure", async () => {
+    const ids: string[] = []
+    const sdk = {
+      v2: {
+        model: { list: async () => [] },
+        session: {
+          create: async () => ({}),
+          prompt: async (input: { id?: string }) => {
+            ids.push(input.id ?? "")
+            if (ids.length === 1) throw new Error("response lost")
+            return {}
+          },
+          switchModel: async () => ({}),
+          wait: async () => ({}),
+          interrupt: async () => ({}),
+          messages: async () => ({
+            data: { data: [{ type: "assistant", content: [{ type: "text", text: "done" }] }] },
+          }),
+        },
+      },
+    } as BotSdk
+
+    await deliverMessage({
+      sdk,
+      sessionID: "session",
+      text: "hello",
+      promptID: "msg_stable",
+      reply: async () => {},
+      log: () => {},
+    })
+    expect(ids).toEqual(["msg_stable", "msg_stable"])
+  })
 })
 
 describe("weixin client", () => {
@@ -111,6 +176,29 @@ describe("weixin client", () => {
     )
     expect(messageText({ item_list: [{ type: 3, voice_item: { text: "voice" } }] })).toBe("voice")
     expect(messageText({ item_list: [{ type: 2, image_item: {} }] })).toBeUndefined()
+  })
+
+  test("rejects a malformed send response instead of reporting false success", async () => {
+    globalThis.fetch = (async () => new Response("not-json", { status: 200 })) as typeof globalThis.fetch
+    await expect(
+      sendText({ token: "token", baseUrl: "https://example.com", toUserId: "user", contextToken: "ctx", text: "hi" }),
+    ).rejects.toThrow("无效响应")
+  })
+
+  test("ignores malformed typing responses because typing is best effort", async () => {
+    globalThis.fetch = (async () => new Response("not-json", { status: 200 })) as typeof globalThis.fetch
+    await expect(
+      sendTyping({ token: "token", baseUrl: "https://example.com", userId: "user", contextToken: "ctx", status: 1 }),
+    ).resolves.toBeUndefined()
+  })
+
+  test("isolates group conversations and generates stable message keys", () => {
+    const direct = { from_user_id: "user", message_id: 42 }
+    const groupA = { ...direct, group_id: "group-a" }
+    const groupB = { ...direct, group_id: "group-b" }
+    expect(conversationKey("bot", direct)).toBe("bot#user")
+    expect(conversationKey("bot", groupA)).not.toBe(conversationKey("bot", groupB))
+    expect(messageKey("bot", groupA)).toBe(messageKey("bot", groupA))
   })
 })
 

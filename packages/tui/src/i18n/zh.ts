@@ -122,6 +122,7 @@ export const dict: Record<DictKey, string> = {
   "question.customAnswer": "输入自定义答案",
   "question.review": "检查答案",
   "question.unanswered": "（未回答）",
+  "question.expired": "连接恢复后该问题已失效，已自动关闭。",
   "question.tab": "切换",
   "question.select": "选择",
   "question.submit": "提交",

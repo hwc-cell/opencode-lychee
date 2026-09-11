@@ -21,9 +21,10 @@ function resolveLocale(): Locale {
 export const locale: Locale = resolveLocale()
 
 export const dict: Dict = locale === "zh" ? zhDict : enDict
+const fallbackDict: Dict = enDict
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  let value = dict[key] ?? enDict[key] ?? key
+  let value = dict[key] ?? fallbackDict[key] ?? key
   if (params) {
     for (const [name, param] of Object.entries(params)) {
       value = value.replaceAll(`{${name}}`, String(param))
@@ -35,7 +36,8 @@ export function t(key: string, params?: Record<string, string | number>): string
 // Command categories are registered as English strings all over the codebase;
 // map them at display time so unknown categories degrade gracefully.
 export function categoryLabel(category: string): string {
-  return dict[`category.${category.toLowerCase()}`] ?? enDict[`category.${category.toLowerCase()}`] ?? category
+  const key = `category.${category.toLowerCase()}`
+  return dict[key] ?? fallbackDict[key] ?? category
 }
 
 export const tips: Tip[] = locale === "zh" ? zhTips : enTips

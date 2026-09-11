@@ -9,11 +9,16 @@ import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useTuiConfig } from "../../config"
 import { useBindings, useOpencodeModeStack } from "../../keymap"
+import { useSync } from "../../context/sync"
+import { useToast } from "../../ui/toast"
+import { isMissingQuestionError } from "./question-error"
 
 const QUESTION_MODE = "question"
 
 export function QuestionPrompt(props: { request: QuestionRequest; directory?: string }) {
   const sdk = useSDK()
+  const sync = useSync()
+  const toast = useToast()
   const { theme } = useTheme()
   const renderer = useRenderer()
   const tuiConfig = useTuiConfig()
@@ -46,20 +51,47 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     return store.answers[store.tab]?.includes(value) ?? false
   })
 
-  function submit() {
-    const answers = questions().map((_, i) => store.answers[i] ?? [])
-    void sdk.client.question.reply({
-      requestID: props.request.id,
-      directory: props.directory,
-      answers,
+  function dismissStale() {
+    const requests = sync.data.question[props.request.sessionID] ?? []
+    sync.set(
+      "question",
+      props.request.sessionID,
+      requests.filter((request) => request.id !== props.request.id),
+    )
+    toast.show({ message: t("question.expired"), variant: "warning" })
+  }
+
+  function send(action: () => Promise<unknown>) {
+    void action().catch((error) => {
+      if (isMissingQuestionError(error)) dismissStale()
+      console.error("Failed to answer question", error)
     })
   }
 
+  function submit() {
+    const answers = questions().map((_, i) => store.answers[i] ?? [])
+    send(() =>
+      sdk.client.question.reply(
+        {
+          requestID: props.request.id,
+          directory: props.directory,
+          answers,
+        },
+        { throwOnError: true },
+      ),
+    )
+  }
+
   function reject() {
-    void sdk.client.question.reject({
-      requestID: props.request.id,
-      directory: props.directory,
-    })
+    send(() =>
+      sdk.client.question.reject(
+        {
+          requestID: props.request.id,
+          directory: props.directory,
+        },
+        { throwOnError: true },
+      ),
+    )
   }
 
   function pick(answer: string, custom: boolean = false) {
@@ -72,11 +104,16 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       setStore("custom", inputs)
     }
     if (single()) {
-      void sdk.client.question.reply({
-        requestID: props.request.id,
-        directory: props.directory,
-        answers: [[answer]],
-      })
+      send(() =>
+        sdk.client.question.reply(
+          {
+            requestID: props.request.id,
+            directory: props.directory,
+            answers: [[answer]],
+          },
+          { throwOnError: true },
+        ),
+      )
       return
     }
     setStore("tab", store.tab + 1)

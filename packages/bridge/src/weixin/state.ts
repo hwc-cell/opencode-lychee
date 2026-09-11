@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import type { WeixinMessage } from "./client"
 
 // 微信 iLink Bot 凭证与状态存储
 // 协议: https://raw.githubusercontent.com/epiral/weixin-bot/main/docs/protocol-spec.md
@@ -18,6 +19,8 @@ export type WeixinCredential = {
 export type WeixinState = {
   credential?: WeixinCredential
   cursor?: string
+  // 已从微信确认接收、但尚未完整处理成功的消息。与 cursor 同次落盘，防止进程崩溃后丢消息。
+  inbox?: Record<string, WeixinMessage>
   // (accountId#userId) -> sessionID (opencode 会话映射)
   sessions?: Record<string, string>
   // (accountId#userId) -> 最近 context_token

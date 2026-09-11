@@ -54,6 +54,16 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
+  test("applies a variant output limit without exceeding the runtime cap", () => {
+    const model = {
+      ...mockModel,
+      limit: { context: 200000, output: 128000 },
+      variants: { compact: { limit: { output: 32000 } } },
+    }
+    expect(ProviderTransform.maxOutputTokens(model, 64000, "compact")).toBe(32000)
+    expect(ProviderTransform.maxOutputTokens(model, 16000, "compact")).toBe(16000)
+  })
+
   test("should not set promptCacheKey when providerOptions.setCacheKey is false", () => {
     const result = ProviderTransform.options({
       model: mockModel,
@@ -541,6 +551,7 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
       },
       variants: {
         high: {
+          limit: { output: 2_345 },
           reasoningEffort: "high",
           reasoningSummary: "auto",
           include: ["reasoning.encrypted_content"],
@@ -587,6 +598,8 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
     expect(result.params.options.reasoningEffort).toBe("high")
     expect(result.params.options.reasoningSummary).toBeUndefined()
     expect(result.params.options.include).toBeUndefined()
+    expect(result.params.options.limit).toBeUndefined()
+    expect(result.params.maxOutputTokens).toBe(2_345)
     expect(result.tools.lookup.strict).toBe(false)
   })
 

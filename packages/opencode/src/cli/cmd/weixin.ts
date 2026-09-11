@@ -132,6 +132,7 @@ const LoginCommand: CommandModule = {
       savedAt: new Date().toISOString(),
     }
     state.cursor = ""
+    state.inbox = {}
     state.contexts = {}
     state.health = { status: "stopped", updatedAt: new Date().toISOString() }
     writeState(state)

@@ -4,7 +4,7 @@ import { t } from "./i18n"
 // 通道无关的聊天代理核心: 处理"发消息给 AI -> 等待 -> 回复"全过程。
 // 微信/Slack/Telegram/飞书 适配器共用, 自动获得:
 //   - 运行中打断通知(⚡️已打断,当前运行:XXX)
-//   - 模型超时自动重试(⚡️模型超时,已尝试X/3次), 按语言输出
+//   - 网络抖动安全重连, 不会重复执行可能包含工具调用的整轮消息
 //   - 按用户串行排队, 新消息打断旧任务后立即接管
 
 export type BridgeModelInfo = {
@@ -38,6 +38,7 @@ export type DeliverArgs = {
   sdk: BotSdk
   sessionID: string
   text: string
+  promptID?: string
   model?: BridgeModelRef
   reply: (text: string) => Promise<void>
   notify?: (text: string) => Promise<void>
@@ -52,7 +53,9 @@ const WORK_REMINDER_MS = Number(process.env.LYCHEE_WORK_REMINDER_MS ?? 300_000)
 // 流式转发的最小发文字数: 每轮轮询(2s)攒够就发一条增量, 用户可实时看到模型打字
 // 微信等无"编辑消息"能力的渠道只能分片: 默认攒 80 字, 避免产生大量零碎气泡
 const MIN_STREAM_LEN = Number(process.env.LYCHEE_STREAM_MIN_CHARS ?? 80)
-const MAX_ATTEMPTS = 3
+const PROMPT_ADMISSION_ATTEMPTS = 3
+const WAIT_RECONNECT_DELAY_MS = 500
+const WAIT_RECONNECT_MAX_MS = 10_000
 
 type RunState = {
   running: boolean
@@ -122,10 +125,23 @@ function rowsOf(res: unknown): AssistantMessage[] {
 }
 
 async function lastAssistant(v2: V2Session, sessionID: string): Promise<AssistantMessage | undefined> {
-  const res = await v2.messages({ sessionID, limit: 10, order: "desc" }, { throwOnError: true }).catch(() => undefined)
-  if (!res) return undefined
+  const res = await v2.messages({ sessionID, limit: 10, order: "desc" }, { throwOnError: true })
   const rows = rowsOf(res).filter((row) => row.type === "assistant")
   return rows[0]
+}
+
+async function readLastAssistant(v2: V2Session, sessionID: string, log: (msg: string) => void) {
+  let failure: unknown
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await lastAssistant(v2, sessionID)
+    } catch (error) {
+      failure = error
+      log(`读取回复失败 (${attempt}/3): ${error instanceof Error ? error.message : error}`)
+      if (attempt < 3) await sleep(WAIT_RECONNECT_DELAY_MS)
+    }
+  }
+  throw failure
 }
 
 function assistantText(assistant: AssistantMessage): string {
@@ -212,14 +228,23 @@ async function waitIdle(
   }, 2000)
   void poll(v2, sessionID, state, stream, log)
   try {
-    const outcome = await Promise.race([
-      v2.wait({ sessionID }, { throwOnError: true }).then(() => "idle" as const),
-      sleep(MODEL_TIMEOUT_MS).then(() => "timeout" as const),
-    ])
-    return outcome
-  } catch (error) {
-    log(`wait 出错: ${error instanceof Error ? error.message : error}`)
-    return "idle" // 连接错误: 回到检查消息的路径, 由 error 判定决定重试/结束
+    const deadline = startedAt + MODEL_TIMEOUT_MS
+    const timedOut = sleep(MODEL_TIMEOUT_MS).then(() => "timeout" as const)
+    let reconnectAttempt = 0
+    while (Date.now() < deadline) {
+      try {
+        return await Promise.race([
+          v2.wait({ sessionID }, { throwOnError: true }).then(() => "idle" as const),
+          timedOut,
+        ])
+      } catch (error) {
+        log(`wait 连接中断, 正在恢复: ${error instanceof Error ? error.message : error}`)
+        reconnectAttempt++
+        const delay = Math.min(WAIT_RECONNECT_DELAY_MS * 2 ** (reconnectAttempt - 1), WAIT_RECONNECT_MAX_MS)
+        await sleep(Math.min(delay, Math.max(0, deadline - Date.now())))
+      }
+    }
+    return "timeout"
   } finally {
     clearInterval(timer)
   }
@@ -258,70 +283,64 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
   log(`🤖 开始处理 (${sessionID}): ${text.slice(0, 20)}…`)
   await notify(t("started"))
   try {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      // 每次尝试使用新 id: 失败后复用同 id 会触发 server 的 PromptConflict(exact-retry 只对未失败的输入有效)
-      const promptID = `msg_${randomUUID().replaceAll("-", "")}`
-      // 新尝试从头流式, 旧尝试已发出的文本不回收
-      state.streamed = ""
-      state.pending = ""
-      let admitted
+    // admission 可能已在服务端成功、但响应在网络中丢失。所有重试复用同一个 ID，
+    // 让 V2 exact-retry 去重，绝不能把可能包含工具调用的整轮对话重新执行。
+    const promptID = args.promptID ?? `msg_${randomUUID().replaceAll("-", "")}`
+    let admitted: unknown
+    for (let attempt = 1; attempt <= PROMPT_ADMISSION_ATTEMPTS; attempt++) {
       try {
         admitted = await v2.prompt({ sessionID, id: promptID, prompt: { text } }, { throwOnError: true })
+        break
       } catch (error) {
-        log(`prompt 出错: ${error instanceof Error ? error.message : error}`)
-        await reply(t("error"))
-        return
-      }
-      log(`已递交 prompt attempt=${attempt} (${(admitted as { data?: { data?: { id?: string } } })?.data?.data?.id ?? "n/a"})`)
-
-      const outcome = await waitIdle(v2, sessionID, state, log, notify, stream)
-      if (state.abortedByUser) {
-        log("被用户消息打断, 静默结束(通知已由新任务发出)")
-        return
-      }
-      if (outcome === "timeout") {
-        log(`看门狗超时 (${MODEL_TIMEOUT_MS / 1000}s), 打断并重试`)
-        state.abortedByUser = true // 防止后续 wait 结果误判为"用户打断"
-        await safeInterrupt(v2, sessionID)
-        // 先把本轮已生成的文本冲给用户, 再提示超时
-        await flushPending(state, stream, log)
-        await reply(t("timeout", { n: attempt }))
-        await sleep(1500)
-        // 下轮重新 prompt 前先把标志清掉
-        state.abortedByUser = false
-        continue
-      }
-
-      const assistant = await lastAssistant(v2, sessionID)
-      if (assistant && !assistant.error) {
-        const finalText = assistantText(assistant)
-        if (finalText) {
-          // 先把未冲掉的流式缓冲发出去, 剩余部分(若有)用最终回复补齐
-          await flushPending(state, stream, log)
-          const remaining = finalText.slice(state.streamed.length)
-          if (remaining) await reply(remaining)
-          log(`✅ 已回复 (${finalText.length} 字, 流式 ${Math.min(state.streamed.length, finalText.length)} 字)`)
+        log(`prompt 递交失败 (${attempt}/${PROMPT_ADMISSION_ATTEMPTS}): ${error instanceof Error ? error.message : error}`)
+        if (attempt === PROMPT_ADMISSION_ATTEMPTS) {
+          await reply(t("error"))
           return
         }
-        await reply(t("noReply"))
-        return
+        await sleep(WAIT_RECONNECT_DELAY_MS)
       }
-
-      // 失败分类
-      const errorName = assistant?.error?.name
-      if (errorName === "MessageAbortedError") {
-        await reply(t("interrupted", { what: state.info || t("thinking") }))
-        return
-      }
-      log(`模型出错 (${errorName ?? "unknown"}), 重试 ${attempt}/${MAX_ATTEMPTS}`)
-      await reply(t("timeout", { n: attempt }))
-      await sleep(1000)
     }
-    await reply(t("failed3"))
+    log(`已递交 prompt (${(admitted as { data?: { data?: { id?: string } } })?.data?.data?.id ?? "n/a"})`)
+
+    const outcome = await waitIdle(v2, sessionID, state, log, notify, stream)
+    if (state.abortedByUser) {
+      log("被用户消息打断, 静默结束(通知已由新任务发出)")
+      return
+    }
+    if (outcome === "timeout") {
+      log(`看门狗超时 (${MODEL_TIMEOUT_MS / 1000}s), 已停止本轮且不自动重投`)
+      state.abortedByUser = true
+      await safeInterrupt(v2, sessionID)
+      await flushPending(state, stream, log)
+      await reply(t("timedOut"))
+      return
+    }
+
+    const assistant = await readLastAssistant(v2, sessionID, log)
+    if (assistant && !assistant.error) {
+      const finalText = assistantText(assistant)
+      if (finalText) {
+        await flushPending(state, stream, log)
+        const remaining = finalText.slice(state.streamed.length)
+        if (remaining) await reply(remaining)
+        log(`✅ 已回复 (${finalText.length} 字, 流式 ${Math.min(state.streamed.length, finalText.length)} 字)`)
+        return
+      }
+      await reply(t("noReply"))
+      return
+    }
+
+    const errorName = assistant?.error?.name
+    if (errorName === "MessageAbortedError") {
+      await reply(t("interrupted", { what: state.info || t("thinking") }))
+      return
+    }
+    log(`模型出错 (${errorName ?? "unknown"}), 服务端重试已结束, 不再重复提交用户消息`)
+    await reply(t("error"))
   } catch (error) {
     log(`处理失败: ${error instanceof Error ? error.message : error}`)
     await reply(t("error"))
   } finally {
-    runState.delete(sessionID)
+    if (runState.get(sessionID) === state) runState.delete(sessionID)
   }
 }

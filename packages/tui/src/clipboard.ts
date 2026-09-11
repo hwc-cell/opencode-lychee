@@ -5,16 +5,31 @@ import path from "node:path"
 import { promisify } from "node:util"
 
 const exec = promisify(execFile)
+const COMMAND_TIMEOUT_MS = 10_000
+const OSC52_MAX_BYTES = 100_000
 
 function command(command: string, args: string[] = [], input?: string) {
   return new Promise<Buffer>((resolve, reject) => {
     const child = spawn(command, args, { stdio: [input === undefined ? "ignore" : "pipe", "pipe", "ignore"] })
     const output: Buffer[] = []
-    child.on("error", reject)
+    let settled = false
+    let timer: ReturnType<typeof setTimeout>
+    const finish = (done: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      done()
+    }
+    timer = setTimeout(() => {
+      child.kill()
+      finish(() => reject(new Error(`${command} timed out after ${COMMAND_TIMEOUT_MS}ms`)))
+    }, COMMAND_TIMEOUT_MS)
+    child.on("error", (error) => finish(() => reject(error)))
+    child.stdin?.on("error", (error) => finish(() => reject(error)))
     child.stdout?.on("data", (chunk: Buffer) => output.push(chunk))
     child.on("close", (code) => {
-      if (code === 0) return resolve(Buffer.concat(output))
-      reject(new Error(`${command} exited with code ${code}`))
+      if (code === 0) return finish(() => resolve(Buffer.concat(output)))
+      finish(() => reject(new Error(`${command} exited with code ${code}`)))
     })
     if (input !== undefined) child.stdin?.end(input)
   })
@@ -22,7 +37,9 @@ function command(command: string, args: string[] = [], input?: string) {
 
 function writeOsc52(text: string) {
   if (!process.stdout.isTTY) return
-  const sequence = `\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`
+  const data = Buffer.from(text)
+  if (data.length > OSC52_MAX_BYTES) return
+  const sequence = `\x1b]52;c;${data.toString("base64")}\x07`
   const passthrough = `\x1bPtmux;\x1b${sequence}\x1b\\`
   process.stdout.write(process.env.TMUX ? sequence + passthrough : process.env.STY ? passthrough : sequence)
 }
@@ -79,7 +96,7 @@ export function copyCommand(
   wayland: boolean,
   has: (name: string) => boolean,
 ): string[] | undefined {
-  if (os === "darwin" && has("osascript")) return ["osascript"]
+  if (os === "darwin" && has("pbcopy")) return ["pbcopy"]
   if (os === "linux" && wayland && has("wl-copy")) return ["wl-copy"]
   if (os === "linux" && has("xclip")) return ["xclip", "-selection", "clipboard"]
   if (os === "linux" && has("xsel")) return ["xsel", "--clipboard", "--input"]
@@ -96,30 +113,29 @@ export function copyCommand(
 
 let copyMethod: Promise<(text: string) => Promise<void>> | undefined
 
+export function sanitizeClipboardText(text: string) {
+  return text.replaceAll("\0", "")
+}
+
 function getCopyMethod() {
   return (copyMethod ??= (async () => {
     const { which } = await import("@opencode-ai/core/util/which")
     const native = copyCommand(platform(), Boolean(process.env.WAYLAND_DISPLAY), (name) => Boolean(which(name)))
-    if (native?.[0] === "osascript") {
-      return async (text: string) => {
-        const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-        await command("osascript", ["-e", `set the clipboard to "${escaped}"`]).catch(() => undefined)
-      }
-    }
     if (native) {
       return async (text: string) => {
-        await command(native[0], native.slice(1), text).catch(() => undefined)
+        await command(native[0], native.slice(1), text)
       }
     }
     return async (text: string) => {
       const { default: clipboardy } = await import("clipboardy")
-      await clipboardy.write(text).catch(() => undefined)
+      await clipboardy.write(text)
     }
   })())
 }
 
 export async function write(text: string) {
-  writeOsc52(text)
+  const value = sanitizeClipboardText(text)
+  writeOsc52(value)
   const method = await getCopyMethod()
-  await method(text)
+  await method(value)
 }

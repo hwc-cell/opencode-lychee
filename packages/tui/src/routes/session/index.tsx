@@ -240,6 +240,7 @@ export function Session() {
   createEffect(() => {
     const current = session()
     if (!current) return
+    const sessionID = current.id
     const hook = async () => {
       if (!kv.get("autolychee", false)) return
       const record = buildSessionRecord({ sessionID, title: current.title, costUSD: current.cost ?? 0 })

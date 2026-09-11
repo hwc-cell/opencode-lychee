@@ -122,6 +122,7 @@ export const dict = {
   "question.customAnswer": "Type your own answer",
   "question.review": "Review",
   "question.unanswered": "(not answered)",
+  "question.expired": "This question expired after reconnecting and was dismissed.",
   "question.tab": "tab",
   "question.select": "select",
   "question.submit": "submit",

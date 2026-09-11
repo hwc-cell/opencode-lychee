@@ -11,6 +11,7 @@ export function bridgeLang(): BridgeLang {
 const messages: Record<BridgeLang, Record<string, string>> = {
   zh: {
     timeout: "⚡️模型超时,已尝试{n}/3次",
+    timedOut: "⚡️模型等待超时,已停止本轮; 为避免重复执行,没有自动重投。",
     interrupted: "⚡️已打断,当前运行:{what}",
     started: "🧠 收到,正在处理…",
     stillWorking: "⏱️ 依然在工作,已工作{m}分钟{extra}",
@@ -54,6 +55,7 @@ const messages: Record<BridgeLang, Record<string, string>> = {
   },
   en: {
     timeout: "⚡️ Model timeout, attempt {n}/3",
+    timedOut: "⚡️ The model timed out and this turn was stopped. It was not resubmitted to avoid duplicate actions.",
     interrupted: "⚡️ Interrupted, now running: {what}",
     started: "🧠 Got it, working on it…",
     stillWorking: "⏱️ Still working, {m} min in{extra}",

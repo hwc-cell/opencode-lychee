@@ -13,6 +13,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Effect, Schema } from "effect"
 import type { InstanceContext } from "@/project/instance-context"
 import { d } from "../i18n"
+import { MessageID, PartID, SessionID } from "@/session/schema"
 
 const decodeMessageInfo = Schema.decodeUnknownSync(SessionV1.Info)
 const decodePart = Schema.decodeUnknownSync(SessionV1.Part)
@@ -177,55 +178,68 @@ const runImport = Effect.fn("Cli.import.body")(function* (file: string, ctx: Ins
     return
   }
 
+  const importedSessionID = SessionID.create()
+  const messageIDs = new Map(exportData.messages.map((message) => [message.info.id, MessageID.ascending()]))
+  for (const msg of exportData.messages) {
+    const msgInfo = decodeMessageInfo(msg.info) as SessionV1.Info
+    if ("parentID" in msgInfo && typeof msgInfo.parentID === "string" && !messageIDs.has(msgInfo.parentID)) {
+      return yield* Effect.die(`Imported message references unknown parent: ${msgInfo.parentID}`)
+    }
+    for (const part of msg.parts) {
+      const partInfo = decodePart(part) as SessionV1.Part
+      if (!messageIDs.has(partInfo.messageID)) {
+        return yield* Effect.die(`Imported part references unknown message: ${partInfo.messageID}`)
+      }
+    }
+  }
   const info = Schema.decodeUnknownSync(Session.Info)({
     ...exportData.info,
+    id: importedSessionID,
+    parentID: undefined,
+    revert: undefined,
     projectID: ctx.project.id,
     directory: ctx.directory,
     path: path.relative(path.resolve(ctx.worktree), ctx.directory).replaceAll("\\", "/"),
   }) as Session.Info
   const row = Session.toRow(info)
   yield* db
-    .insert(SessionTable)
-    .values(row)
-    .onConflictDoUpdate({
-      target: SessionTable.id,
-      set: { project_id: row.project_id, directory: row.directory, path: row.path },
-    })
-    .run()
+    .transaction((tx) =>
+      Effect.gen(function* () {
+        yield* tx.insert(SessionTable).values(row).run()
+        for (const msg of exportData.messages) {
+          const msgInfo = decodeMessageInfo(msg.info) as SessionV1.Info
+          const { id: sourceID, sessionID: _, ...msgData } = msgInfo
+          const id = messageIDs.get(sourceID)!
+          const data = { ...msgData } as Record<string, unknown>
+          if (typeof data.parentID === "string") data.parentID = messageIDs.get(data.parentID)!
+          yield* tx
+            .insert(MessageTable)
+            .values({
+              id,
+              session_id: row.id,
+              time_created: msgInfo.time?.created ?? Date.now(),
+              data: data as never,
+            })
+            .run()
+
+          for (const part of msg.parts) {
+            const partInfo = decodePart(part) as SessionV1.Part
+            const { id: _partID, sessionID: _s, messageID, ...partData } = partInfo
+            yield* tx
+              .insert(PartTable)
+              .values({
+                id: PartID.ascending(),
+                message_id: messageIDs.get(messageID)!,
+                session_id: row.id,
+                data: partData,
+              })
+              .run()
+          }
+        }
+      }),
+    )
     .pipe(Effect.orDie)
 
-  for (const msg of exportData.messages) {
-    const msgInfo = decodeMessageInfo(msg.info) as SessionV1.Info
-    const { id, sessionID: _, ...msgData } = msgInfo
-    yield* db
-      .insert(MessageTable)
-      .values({
-        id,
-        session_id: row.id,
-        time_created: msgInfo.time?.created ?? Date.now(),
-        data: msgData as never,
-      })
-      .onConflictDoNothing()
-      .run()
-      .pipe(Effect.orDie)
-
-    for (const part of msg.parts) {
-      const partInfo = decodePart(part) as SessionV1.Part
-      const { id: partId, sessionID: _s, messageID, ...partData } = partInfo
-      yield* db
-        .insert(PartTable)
-        .values({
-          id: partId,
-          message_id: messageID,
-          session_id: row.id,
-          data: partData,
-        })
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.orDie)
-    }
-  }
-
-  process.stdout.write(`Imported session: ${exportData.info.id}`)
+  process.stdout.write(`Imported session: ${row.id}`)
   process.stdout.write(EOL)
 })

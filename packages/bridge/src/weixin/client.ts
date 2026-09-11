@@ -177,7 +177,12 @@ export async function getUpdates(opts: {
   }
   // 成功响应不带 ret/errcode 字段(实测), 缺失视为 0
   const ret = json.ret ?? json.errcode ?? 0
-  return { ret, msgs: json.msgs ?? [], get_updates_buf: json.get_updates_buf, longpolling_timeout_ms: json.longpolling_timeout_ms }
+  return {
+    ret,
+    msgs: json.msgs ?? [],
+    get_updates_buf: json.get_updates_buf,
+    longpolling_timeout_ms: json.longpolling_timeout_ms,
+  }
 }
 
 export async function sendText(opts: {
@@ -205,7 +210,14 @@ export async function sendText(opts: {
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`发送失败: HTTP ${res.status}`)
-  const json = (await res.json().catch(() => ({}))) as { ret?: number }
+  const body = await res.text()
+  if (!body) return
+  let json: { ret?: number }
+  try {
+    json = JSON.parse(body) as { ret?: number }
+  } catch {
+    throw new Error("发送失败: 服务端返回了无效响应")
+  }
   if (json.ret !== undefined && json.ret !== 0) throw new Error(`发送失败: ret=${json.ret}`)
 }
 
@@ -245,8 +257,8 @@ export async function sendTyping(opts: {
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
   }).catch(() => undefined)
   if (!cfg?.ok) return
-  const cfgJson = (await cfg.json()) as { typing_ticket?: string }
-  if (!cfgJson.typing_ticket) return
+  const cfgJson = (await cfg.json().catch(() => undefined)) as { typing_ticket?: string } | undefined
+  if (!cfgJson?.typing_ticket) return
   await fetch(`${opts.baseUrl}/ilink/bot/sendtyping`, {
     method: "POST",
     headers: baseHeaders(opts.token),

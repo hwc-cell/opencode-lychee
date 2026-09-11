@@ -1,17 +1,44 @@
 import { describe, expect, test } from "bun:test"
-import { adaptServerEvent, coalesceServerEvents, enqueueServerEvent, resumeStreamAfterPageShow } from "./server-sdk"
+import {
+  adaptServerEvent,
+  coalesceServerEvents,
+  enqueueServerEvent,
+  reconnectDelay,
+  resumeStreamAfterPageShow,
+  resumeStreamAfterVisibilityChange,
+} from "./server-sdk"
 import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 
 describe("resumeStreamAfterPageShow", () => {
-  test("restarts a stream only after a back-forward cache restore", () => {
+  test("restarts a stream after both ordinary and back-forward cache restores", () => {
     let starts = 0
     const start = () => starts++
 
     resumeStreamAfterPageShow({ persisted: false } as PageTransitionEvent, start)
     resumeStreamAfterPageShow({ persisted: true } as PageTransitionEvent, start)
 
-    expect(starts).toBe(1)
+    expect(starts).toBe(2)
+  })
+})
+
+describe("reconnectDelay", () => {
+  test("backs off repeated failures and caps the delay", () => {
+    expect([1, 2, 3, 4].map(reconnectDelay)).toEqual([250, 500, 1000, 2000])
+    expect(reconnectDelay(100)).toBe(30_000)
+  })
+})
+
+describe("resumeStreamAfterVisibilityChange", () => {
+  test("restarts only when the app returns to the foreground", () => {
+    const calls: string[] = []
+    const stop = () => calls.push("stop")
+    const start = () => calls.push("start")
+
+    resumeStreamAfterVisibilityChange("hidden", stop, start)
+    resumeStreamAfterVisibilityChange("visible", stop, start)
+
+    expect(calls).toEqual(["stop", "start"])
   })
 })
 
