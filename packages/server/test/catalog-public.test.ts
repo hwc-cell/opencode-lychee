@@ -48,6 +48,6 @@ describe("public catalog", () => {
     const result = publicModel(model)
     expect(result.api.settings).toEqual({ mode: "fast" })
     expect(result.request).toEqual({ headers: {}, body: { mode: "fast" } })
-    expect(result.variants[0]).toEqual({ id: "high", headers: {}, body: { effort: "high" } })
+    expect(result.variants[0]).toEqual({ id: model.variants[0]!.id, headers: {}, body: { effort: "high" } })
   })
 })
