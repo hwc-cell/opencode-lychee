@@ -44,6 +44,19 @@ test("resolveTheme rejects circular color refs", () => {
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
 })
 
+test("lychee blue themes are separate built-in themes", () => {
+  expect(DEFAULT_THEMES.lychee).toBeDefined()
+  expect(DEFAULT_THEMES["lychee-clear-sky"]).toBeDefined()
+  expect(DEFAULT_THEMES["lychee-soda"]).toBeDefined()
+  expect(DEFAULT_THEMES["lychee-clear-sky"]).not.toBe(DEFAULT_THEMES.lychee)
+  expect(DEFAULT_THEMES["lychee-soda"]).not.toBe(DEFAULT_THEMES.lychee)
+
+  expect(() => resolveTheme(DEFAULT_THEMES["lychee-clear-sky"]!, "light")).not.toThrow()
+  expect(() => resolveTheme(DEFAULT_THEMES["lychee-clear-sky"]!, "dark")).not.toThrow()
+  expect(() => resolveTheme(DEFAULT_THEMES["lychee-soda"]!, "light")).not.toThrow()
+  expect(() => resolveTheme(DEFAULT_THEMES["lychee-soda"]!, "dark")).not.toThrow()
+})
+
 function terminalColors(defaultBackground: string | null, palette: Array<string | null> = []): TerminalColors {
   return {
     palette,

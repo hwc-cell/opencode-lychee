@@ -15,6 +15,8 @@ import flexokiThemeJson from "./themes/flexoki.json"
 import githubThemeJson from "./themes/github.json"
 import gruvboxThemeJson from "./themes/gruvbox.json"
 import kanagawaThemeJson from "./themes/kanagawa.json"
+import lycheeClearSkyThemeJson from "./themes/lychee-clear-sky.json"
+import lycheeSodaThemeJson from "./themes/lychee-soda.json"
 import lucentOrngThemeJson from "./themes/lucent-orng.json"
 import materialThemeJson from "./themes/material.json"
 import matrixThemeJson from "./themes/matrix.json"
@@ -53,6 +55,8 @@ export const flexokiTheme = flexokiThemeJson as DesktopTheme
 export const githubTheme = githubThemeJson as DesktopTheme
 export const gruvboxTheme = gruvboxThemeJson as DesktopTheme
 export const kanagawaTheme = kanagawaThemeJson as DesktopTheme
+export const lycheeClearSkyTheme = lycheeClearSkyThemeJson as DesktopTheme
+export const lycheeSodaTheme = lycheeSodaThemeJson as DesktopTheme
 export const lucentOrngTheme = lucentOrngThemeJson as DesktopTheme
 export const materialTheme = materialThemeJson as DesktopTheme
 export const matrixTheme = matrixThemeJson as DesktopTheme
@@ -92,6 +96,8 @@ export const DEFAULT_THEMES: Record<string, DesktopTheme> = {
   github: githubTheme,
   gruvbox: gruvboxTheme,
   kanagawa: kanagawaTheme,
+  "lychee-clear-sky": lycheeClearSkyTheme,
+  "lychee-soda": lycheeSodaTheme,
   "lucent-orng": lucentOrngTheme,
   material: materialTheme,
   matrix: matrixTheme,

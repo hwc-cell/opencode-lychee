@@ -54,6 +54,8 @@ export {
   githubTheme,
   gruvboxTheme,
   kanagawaTheme,
+  lycheeClearSkyTheme,
+  lycheeSodaTheme,
   lucentOrngTheme,
   materialTheme,
   matrixTheme,

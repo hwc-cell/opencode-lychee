@@ -14,6 +14,8 @@ import github from "./assets/github.json" with { type: "json" }
 import gruvbox from "./assets/gruvbox.json" with { type: "json" }
 import kanagawa from "./assets/kanagawa.json" with { type: "json" }
 import lychee from "./assets/lychee.json" with { type: "json" }
+import lycheeClearSky from "./assets/lychee-clear-sky.json" with { type: "json" }
+import lycheeSoda from "./assets/lychee-soda.json" with { type: "json" }
 import lucentOrng from "./assets/lucent-orng.json" with { type: "json" }
 import material from "./assets/material.json" with { type: "json" }
 import matrix from "./assets/matrix.json" with { type: "json" }
@@ -143,6 +145,8 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   gruvbox,
   kanagawa,
   lychee,
+  ["lychee-clear-sky"]: lycheeClearSky,
+  ["lychee-soda"]: lycheeSoda,
   material,
   matrix,
   mercury,
