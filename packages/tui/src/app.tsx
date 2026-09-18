@@ -361,8 +361,10 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
   )
   yield* Effect.sync(() => {
     win32FlushInputBuffer()
-    if (result.reason !== undefined)
+    if (result.reason !== undefined) {
       process.stderr.write((cliErrorMessage(result.reason) ?? errorFormat(result.reason)) + "\n")
+      process.exitCode = 1
+    }
     if (result.epilogue) process.stdout.write(result.epilogue + "\n")
   })
   // 会话关闭后运行异步钩子(如荔枝小结), 进程保持等待
