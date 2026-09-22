@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { createCipheriv } from "node:crypto"
 import { deliverMessage, enqueue, isQueued, type BotSdk } from "../src/bot"
 import { handleChatCommand } from "../src/commands"
 import { chunkText, loginUntilConfirmed, messageText, sendText, sendTyping } from "../src/weixin/client"
 import { conversationKey, messageKey } from "../src/weixin/keys"
+import { decodeMediaKey, messagePrompt } from "../src/weixin/media"
 
 const fetch = globalThis.fetch
 
@@ -122,6 +124,33 @@ describe("queue", () => {
     })
     expect(ids).toEqual(["msg_stable", "msg_stable"])
   })
+
+  test("forwards media attachments with the durable prompt", async () => {
+    let prompt: { text: string; files?: Array<{ uri: string; mime: string; name?: string }> } | undefined
+    const sdk = {
+      v2: {
+        model: { list: async () => [] },
+        session: {
+          create: async () => ({}),
+          prompt: async (input: { prompt?: typeof prompt }) => {
+            prompt = input.prompt
+            return {}
+          },
+          switchModel: async () => ({}),
+          wait: async () => ({}),
+          interrupt: async () => ({}),
+          messages: async () => ({
+            data: { data: [{ type: "assistant", content: [{ type: "text", text: "done" }] }] },
+          }),
+        },
+      },
+    } as BotSdk
+    const files = [{ uri: "data:image/png;base64,aGVsbG8=", mime: "image/png", name: "photo.png" }]
+
+    await deliverMessage({ sdk, sessionID: "session", text: "inspect", files, reply: async () => {}, log: () => {} })
+
+    expect(prompt).toEqual({ text: "inspect", files })
+  })
 })
 
 describe("weixin client", () => {
@@ -170,12 +199,105 @@ describe("weixin client", () => {
     expect(order).toEqual(["render-start", "render-end", "poll"])
   })
 
-  test("combines text items and falls back to voice transcripts", () => {
-    expect(messageText({ item_list: [{ type: 1, text_item: { text: "one" } }, { type: 1, text_item: { text: "two" } }] })).toBe(
-      "one\ntwo",
-    )
-    expect(messageText({ item_list: [{ type: 3, voice_item: { text: "voice" } }] })).toBe("voice")
+  test("combines text items and voice transcripts in message order", () => {
+    expect(
+      messageText({
+        item_list: [
+          { type: 1, text_item: { text: "one" } },
+          { type: 3, voice_item: { text: "voice" } },
+          { type: 1, text_item: { text: "two" } },
+        ],
+      }),
+    ).toBe("one\nvoice\ntwo")
     expect(messageText({ item_list: [{ type: 2, image_item: {} }] })).toBeUndefined()
+  })
+
+  test("decodes both iLink AES key formats and decrypts image media", async () => {
+    const key = Buffer.from("00112233445566778899aabbccddeeff", "hex")
+    const plaintext = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("image"),
+    ])
+    const cipher = createCipheriv("aes-128-ecb", key, null)
+    const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
+    globalThis.fetch = (async () => new Response(encrypted)) as typeof globalThis.fetch
+
+    expect(decodeMediaKey(key.toString("base64"))).toEqual(key)
+    expect(decodeMediaKey(Buffer.from(key.toString("hex")).toString("base64"))).toEqual(key)
+
+    const prompt = await messagePrompt({
+      item_list: [
+        {
+          type: 2,
+          image_item: {
+            media: { encrypt_query_param: "query", aes_key: key.toString("base64") },
+          },
+        },
+      ],
+    })
+
+    expect(prompt.text).toContain("微信图片")
+    expect(prompt.files).toEqual([
+      {
+        uri: `data:image/png;base64,${plaintext.toString("base64")}`,
+        mime: "image/png",
+        name: "wechat-image-1.jpg",
+      },
+    ])
+  })
+
+  test("rejects untrusted media URLs", async () => {
+    await expect(
+      messagePrompt({
+        item_list: [{ type: 4, file_item: { file_name: "secret.txt", url: "https://example.com/secret.txt" } }],
+      }),
+    ).rejects.toThrow("不受信任")
+  })
+
+  test("uses WeChat voice transcripts without downloading the audio", async () => {
+    let fetched = false
+    globalThis.fetch = (async () => {
+      fetched = true
+      return new Response()
+    }) as typeof globalThis.fetch
+
+    await expect(
+      messagePrompt({
+        item_list: [
+          {
+            type: 3,
+            voice_item: { text: "明天下午三点开会", media: { encrypt_query_param: "unused" } },
+          },
+        ],
+      }),
+    ).resolves.toEqual({ text: "明天下午三点开会", files: [] })
+    expect(fetched).toBe(false)
+  })
+
+  test("rejects media announced above the default size limit", async () => {
+    globalThis.fetch = (async () =>
+      new Response("too large", { headers: { "content-length": String(11 * 1024 * 1024) } })) as typeof globalThis.fetch
+
+    await expect(
+      messagePrompt({
+        item_list: [{ type: 4, file_item: { file_name: "large.pdf", media: { encrypt_query_param: "query" } } }],
+      }),
+    ).rejects.toThrow("10MB")
+  })
+
+  test("does not forward encrypted media without a key", async () => {
+    globalThis.fetch = (async () => new Response("ciphertext")) as typeof globalThis.fetch
+
+    await expect(
+      messagePrompt({
+        item_list: [
+          {
+            type: 2,
+            image_item: { media: { encrypt_query_param: "query", encrypt_type: 1 } },
+          },
+        ],
+      }),
+    ).rejects.toThrow("缺少解密密钥")
   })
 
   test("rejects a malformed send response instead of reporting false success", async () => {
@@ -224,5 +346,56 @@ describe("chat commands", () => {
     expect(await handleChatCommand({ ...args, text: "/model provider/model" })).toBe(true)
     expect(model).toBe("provider/model")
     expect(await handleChatCommand({ ...args, text: "/help" })).toBe(true)
+  })
+
+  test("handles session controls and preserves directory casing", async () => {
+    const replies: string[] = []
+    const calls: string[] = []
+    const args = {
+      channel: "weixin",
+      fromUserId: "owner",
+      ownerUserId: "owner",
+      workDir: "/work",
+      reply: async (text: string) => {
+        replies.push(text)
+      },
+      log: () => {},
+      controls: {
+        newSession: async () => {
+          calls.push("new")
+          return true
+        },
+        clearSession: async () => {
+          calls.push("clear")
+          return true
+        },
+        stop: async () => {
+          calls.push("stop")
+          return true
+        },
+        status: async () => ({
+          directory: "/Work/MyProject",
+          model: { id: "model", providerID: "provider", variant: "max" },
+          sessionID: "session",
+          running: true,
+        }),
+        directory: async (next?: string) => {
+          calls.push(`where:${next ?? ""}`)
+          return { ok: true, directory: next ?? "/Work/MyProject", changed: Boolean(next) }
+        },
+      },
+    }
+
+    expect(await handleChatCommand({ ...args, text: "/new" })).toBe(true)
+    expect(await handleChatCommand({ ...args, text: "/stop" })).toBe(true)
+    expect(await handleChatCommand({ ...args, text: "/status" })).toBe(true)
+    expect(await handleChatCommand({ ...args, text: "/where /Work/MyProject" })).toBe(true)
+    expect(await handleChatCommand({ ...args, text: "/clear" })).toBe(true)
+    expect(calls).toEqual(["new", "stop", "where:/Work/MyProject", "clear"])
+    expect(replies.some((reply) => reply.includes("provider/model (max)"))).toBe(true)
+
+    expect(await handleChatCommand({ ...args, fromUserId: "guest", text: "/where /Secret" })).toBe(true)
+    expect(calls).toEqual(["new", "stop", "where:/Work/MyProject", "clear"])
+    expect(replies.at(-1)).toContain("只有扫码登录的账号")
   })
 })

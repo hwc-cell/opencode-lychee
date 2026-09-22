@@ -6,7 +6,33 @@ import type { BridgeModelInfo, BridgeModelRef } from "./bot"
 // 适配器只需在收到用户文本时先调用 handleChatCommand, 返回 true 表示已被命令消费。
 // 文案按 OPENCODE_LANG 自动切换 zh/en。
 
-export const CHAT_COMMANDS = ["/model", "/autostart", "/autostop", "/help", "/halp"]
+export const CHAT_COMMANDS = [
+  "/model",
+  "/new",
+  "/stop",
+  "/status",
+  "/where",
+  "/clear",
+  "/autostart",
+  "/autostop",
+  "/help",
+  "/halp",
+]
+
+export type ChatCommandStatus = {
+  directory: string
+  model?: BridgeModelRef
+  sessionID?: string
+  running: boolean
+}
+
+export type ChatCommandControls = {
+  newSession: () => Promise<boolean>
+  clearSession: () => Promise<boolean>
+  stop: () => Promise<boolean>
+  status: () => Promise<ChatCommandStatus>
+  directory: (next?: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
+}
 
 export async function handleChatCommand(args: {
   channel: string
@@ -21,8 +47,10 @@ export async function handleChatCommand(args: {
     list: () => Promise<BridgeModelInfo[]>
     switchModel: (model: BridgeModelRef) => Promise<boolean>
   }
+  controls?: ChatCommandControls
 }): Promise<boolean> {
-  const command = args.text.trim().toLowerCase()
+  const text = args.text.trim()
+  const command = text.toLowerCase()
   const isOwner = args.fromUserId === args.ownerUserId
 
   if (command === "/model" || command.startsWith("/model ")) {
@@ -33,6 +61,62 @@ export async function handleChatCommand(args: {
   if (command === "/help" || command === "/halp") {
     await args.reply(t("cmdHelp"))
     args.log(`聊天指令 ${command} 已回复`)
+    return true
+  }
+
+  if (command === "/new") {
+    if (!args.controls) return false
+    const created = await args.controls.newSession()
+    await args.reply(created ? t("cmdNewSession") : t("cmdNewSessionFailed"))
+    return true
+  }
+
+  if (command === "/clear") {
+    if (!args.controls) return false
+    const cleared = await args.controls.clearSession()
+    await args.reply(cleared ? t("cmdSessionCleared") : t("cmdSessionAlreadyClear"))
+    return true
+  }
+
+  if (command === "/stop") {
+    if (!args.controls) return false
+    const stopped = await args.controls.stop()
+    await args.reply(stopped ? t("cmdStopped") : t("cmdNothingRunning"))
+    return true
+  }
+
+  if (command === "/status") {
+    if (!args.controls) return false
+    const status = await args.controls.status()
+    const model = status.model
+      ? `${status.model.providerID}/${status.model.id}${status.model.variant ? ` (${status.model.variant})` : ""}`
+      : t("cmdStatusNoModel")
+    const session = status.running
+      ? t("cmdStatusRunning")
+      : status.sessionID
+        ? t("cmdStatusReady")
+        : t("cmdStatusNoSession")
+    await args.reply(t("cmdStatus", { model, directory: status.directory, session }))
+    return true
+  }
+
+  if (command === "/where" || command.startsWith("/where ")) {
+    if (!args.controls) return false
+    const next = text.slice("/where".length).trim()
+    if (next && !isOwner) {
+      await args.reply(t("cmdOwnerOnly"))
+      return true
+    }
+    const result = await args.controls.directory(next || undefined)
+    if (!result.ok) {
+      await args.reply(t("cmdDirectoryFailed", { error: result.error ?? t("cmdDirectoryUnknownError") }))
+      return true
+    }
+    await args.reply(
+      next && result.changed
+        ? t("cmdDirectoryChanged", { directory: result.directory })
+        : t("cmdDirectoryCurrent", { directory: result.directory }),
+    )
     return true
   }
 
@@ -98,7 +182,11 @@ async function handleModelCommand(
     const head = words.slice(0, -1).join(" ")
     if (tail && head) {
       for (const m of list) {
-        if (m.enabled !== false && normName(m.name ?? m.id) === normName(head) && m.variants?.some((v) => v.id === tail)) {
+        if (
+          m.enabled !== false &&
+          normName(m.name ?? m.id) === normName(head) &&
+          m.variants?.some((v) => v.id === tail)
+        ) {
           match = m
           variant = tail
           break

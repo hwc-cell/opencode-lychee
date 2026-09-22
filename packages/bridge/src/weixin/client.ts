@@ -1,4 +1,4 @@
-// 微信 iLink Bot API 客户端(仅文本; 媒体见协议文档 §8, v2 实现)
+// 微信 iLink Bot API 客户端
 import { randomBytes } from "node:crypto"
 
 const DEFAULT_BASE = "https://ilinkai.weixin.qq.com"
@@ -119,6 +119,64 @@ export async function loginUntilConfirmed(opts: {
 }
 
 // ---------- 业务 ----------
+export type WeixinMedia = {
+  encrypt_query_param?: string
+  encryptQueryParam?: string
+  aes_key?: string
+  aesKey?: string
+  aeskey?: string
+  encrypt_type?: number
+  encryptType?: number
+  url?: string
+  full_url?: string
+  fullUrl?: string
+  download_url?: string
+  downloadUrl?: string
+}
+
+export type WeixinMessageItem = {
+  type?: number
+  text_item?: { text?: string }
+  voice_item?: {
+    text?: string
+    media?: WeixinMedia
+    aeskey?: string
+    aes_key?: string
+    encode_type?: number
+    encodeType?: number
+    file_name?: string
+    fileName?: string
+    playtime?: number
+  }
+  image_item?: {
+    media?: WeixinMedia
+    thumb_media?: WeixinMedia
+    aeskey?: string
+    aes_key?: string
+    url?: string
+    mid_size?: number
+  }
+  file_item?: {
+    media?: WeixinMedia
+    aeskey?: string
+    aes_key?: string
+    url?: string
+    file_name?: string
+    fileName?: string
+    len?: string
+  }
+  video_item?: {
+    media?: WeixinMedia
+    thumb_media?: WeixinMedia
+    aeskey?: string
+    aes_key?: string
+    url?: string
+    file_name?: string
+    fileName?: string
+    video_size?: number
+  }
+}
+
 export type WeixinMessage = {
   seq?: number
   message_id?: number
@@ -130,23 +188,19 @@ export type WeixinMessage = {
   message_type?: number
   message_state?: number
   context_token?: string
-  item_list?: Array<{
-    type?: number
-    text_item?: { text?: string }
-    voice_item?: { text?: string }
-    image_item?: unknown
-    file_item?: unknown
-    video_item?: unknown
-  }>
+  item_list?: WeixinMessageItem[]
 }
 
-/** 合并一条消息里的文字片段; 语音仅在微信提供转写时可用。 */
+/** 合并一条消息里的文字与语音转写片段。 */
 export function messageText(msg: WeixinMessage): string | undefined {
   const text = msg.item_list
-    ?.filter((item) => item.type === 1 && item.text_item?.text)
-    .map((item) => item.text_item!.text!)
+    ?.flatMap((item) => {
+      if (item.text_item?.text) return [item.text_item.text]
+      if (item.voice_item?.text) return [item.voice_item.text]
+      return []
+    })
     .join("\n")
-  return text || msg.item_list?.find((item) => item.type === 3)?.voice_item?.text || undefined
+  return text || undefined
 }
 
 export async function getUpdates(opts: {

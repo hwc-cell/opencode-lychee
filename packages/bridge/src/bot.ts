@@ -16,20 +16,44 @@ export type BridgeModelInfo = {
 }
 
 export type BridgeModelRef = { id: string; providerID: string; variant?: string }
+export type BridgeFile = { uri: string; mime: string; name?: string }
 type SdkOptions = { throwOnError?: boolean }
 
 export type BotSdk = {
   v2: {
     model: {
-      list(parameters?: { location?: { directory?: string; workspace?: string } }, options?: SdkOptions): Promise<unknown>
+      list(
+        parameters?: { location?: { directory?: string; workspace?: string } },
+        options?: SdkOptions,
+      ): Promise<unknown>
     }
     session: {
-      create(parameters?: { id?: string; agent?: string; role?: string; model?: { id: string; providerID: string; variant?: string }; location?: { directory?: string; workspace?: string } }, options?: SdkOptions): Promise<unknown>
-      prompt(parameters: { sessionID: string; id?: string; prompt?: { text: string }; delivery?: "steer" | "queue" }, options?: SdkOptions): Promise<unknown>
+      create(
+        parameters?: {
+          id?: string
+          agent?: string
+          role?: string
+          model?: { id: string; providerID: string; variant?: string }
+          location?: { directory?: string; workspace?: string }
+        },
+        options?: SdkOptions,
+      ): Promise<unknown>
+      prompt(
+        parameters: {
+          sessionID: string
+          id?: string
+          prompt?: { text: string; files?: BridgeFile[] }
+          delivery?: "steer" | "queue"
+        },
+        options?: SdkOptions,
+      ): Promise<unknown>
       switchModel(parameters: { sessionID: string; model: BridgeModelRef }, options?: SdkOptions): Promise<unknown>
       wait(parameters: { sessionID: string }, options?: SdkOptions): Promise<unknown>
       interrupt(parameters: { sessionID: string }, options?: SdkOptions): Promise<unknown>
-      messages(parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" }, options?: SdkOptions): Promise<unknown>
+      messages(
+        parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" },
+        options?: SdkOptions,
+      ): Promise<unknown>
     }
   }
 }
@@ -38,6 +62,7 @@ export type DeliverArgs = {
   sdk: BotSdk
   sessionID: string
   text: string
+  files?: BridgeFile[]
   promptID?: string
   model?: BridgeModelRef
   reply: (text: string) => Promise<void>
@@ -87,6 +112,10 @@ export function enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
 
 export function isQueued(key: string): boolean {
   return queues.has(key)
+}
+
+export function isSessionRunning(sessionID: string): boolean {
+  return runState.get(sessionID)?.running ?? false
 }
 
 type V2Session = BotSdk["v2"]["session"]
@@ -167,14 +196,22 @@ async function flushPending(state: RunState, stream: (text: string) => Promise<v
 }
 
 // 轮询一次: 更新"当前运行"信息 + 流式转发模型已生成的新文本
-async function poll(v2: V2Session, sessionID: string, state: RunState, stream: (text: string) => Promise<void>, log: (msg: string) => void) {
+async function poll(
+  v2: V2Session,
+  sessionID: string,
+  state: RunState,
+  stream: (text: string) => Promise<void>,
+  log: (msg: string) => void,
+) {
   if (state.polling) return
   state.polling = true
   try {
     const assistant = await lastAssistant(v2, sessionID)
     if (!assistant) return
     // 运行状态
-    const runningTool = assistant.content?.find((part) => part.type === "tool" && part.state?.status !== "completed" && part.state?.status !== "error")
+    const runningTool = assistant.content?.find(
+      (part) => part.type === "tool" && part.state?.status !== "completed" && part.state?.status !== "error",
+    )
     if (runningTool?.name) {
       state.tool = runningTool.name
       state.info = t("runningTool", { tool: runningTool.name })
@@ -221,7 +258,9 @@ async function waitIdle(
       if (elapsed - (lastReminder - startedAt) >= WORK_REMINDER_MS) {
         lastReminder = Date.now()
         const mins = Math.max(1, Math.floor(elapsed / 60_000))
-        await notify(t("stillWorking", { m: mins, extra: state.tool ? t("stillWorkingTool", { tool: state.tool }) : "" }))
+        await notify(
+          t("stillWorking", { m: mins, extra: state.tool ? t("stillWorkingTool", { tool: state.tool }) : "" }),
+        )
         log(`工作提醒: 已工作约 ${mins} 分钟${state.tool ? ` (${state.tool})` : ""}`)
       }
     })().catch(() => {})
@@ -251,12 +290,18 @@ async function waitIdle(
 }
 
 // 用户在当前运行中又发了新消息: 打断并通知, 旧任务随后静默结束
-export async function interruptCurrent(args: { sdk: BotSdk; sessionID: string; reply: (text: string) => Promise<void>; log: (msg: string) => void }): Promise<boolean> {
+export async function interruptCurrent(args: {
+  sdk: BotSdk
+  sessionID: string
+  reply: (text: string) => Promise<void>
+  log: (msg: string) => void
+  notify?: boolean
+}): Promise<boolean> {
   const state = runState.get(args.sessionID)
   if (!state?.running) return false
   state.abortedByUser = true
   await safeInterrupt(args.sdk.v2.session, args.sessionID)
-  await args.reply(t("interrupted", { what: state.info || t("thinking") }))
+  if (args.notify !== false) await args.reply(t("interrupted", { what: state.info || t("thinking") }))
   args.log(`已打断运行中的对话 (${args.sessionID})`)
   return true
 }
@@ -274,7 +319,14 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     await sleep(500)
   }
 
-  const state: RunState = { running: true, info: t("thinking"), abortedByUser: false, streamed: "", pending: "", polling: false }
+  const state: RunState = {
+    running: true,
+    info: t("thinking"),
+    abortedByUser: false,
+    streamed: "",
+    pending: "",
+    polling: false,
+  }
   runState.set(sessionID, state)
   // 钉死模型: session 级 model 不持久, 每次处理前切一次(失败不阻塞, 只用默认)
   if (args.model) {
@@ -289,10 +341,15 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     let admitted: unknown
     for (let attempt = 1; attempt <= PROMPT_ADMISSION_ATTEMPTS; attempt++) {
       try {
-        admitted = await v2.prompt({ sessionID, id: promptID, prompt: { text } }, { throwOnError: true })
+        admitted = await v2.prompt(
+          { sessionID, id: promptID, prompt: { text, ...(args.files?.length ? { files: args.files } : {}) } },
+          { throwOnError: true },
+        )
         break
       } catch (error) {
-        log(`prompt 递交失败 (${attempt}/${PROMPT_ADMISSION_ATTEMPTS}): ${error instanceof Error ? error.message : error}`)
+        log(
+          `prompt 递交失败 (${attempt}/${PROMPT_ADMISSION_ATTEMPTS}): ${error instanceof Error ? error.message : error}`,
+        )
         if (attempt === PROMPT_ADMISSION_ATTEMPTS) {
           await reply(t("error"))
           return

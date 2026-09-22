@@ -70,7 +70,9 @@ OpenCode-Lychee weixin autostart   # macOS: start on login and restart after a c
 
 Use `OpenCode-Lychee weixin run` for foreground operation, `status` to inspect the real connection state, `autostop` to remove the macOS service, and `logout` to clear local login and session state.
 
-Inside WeChat, use `/model` to list models, `/model <name> [intensity]` to switch, `/autostart` or `/autostop` to manage the daemon, and `/help` for help. The legacy `/halp` spelling remains supported.
+Inside WeChat, use `/model` to select models, `/new` or `/clear` to manage the conversation, `/stop` to interrupt work, `/status` to inspect the current state, `/where [directory]` to inspect or change the AI working directory, and `/help` for help. The legacy `/halp` spelling remains supported.
+
+The bridge accepts text, WeChat voice transcripts, images, files, and video attachments. Media is downloaded only from trusted WeChat CDN hosts, decrypted in memory, and limited to 10MB per attachment and 20MB per message by default (`LYCHEE_MEDIA_MAX_BYTES` and `LYCHEE_MEDIA_TOTAL_MAX_BYTES` override the limits).
 
 The bridge streams model output and reports progress every five minutes by default. A new message can interrupt an active task. If the waiting connection drops, it reconnects safely; if the model reaches the overall timeout, the turn is stopped and reported without resubmitting the full request, preventing duplicate tool actions.
 

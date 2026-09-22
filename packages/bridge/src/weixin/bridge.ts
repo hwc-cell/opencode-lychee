@@ -1,10 +1,24 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { randomUUID } from "node:crypto"
+import { stat } from "node:fs/promises"
+import { homedir } from "node:os"
+import path from "node:path"
 import { chunkText, getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
 import { conversationKey, messageKey, promptID } from "./keys"
+import { messagePrompt } from "./media"
 import { readState, updateState } from "./state"
 import { handleChatCommand } from "../commands"
-import { deliverMessage, enqueue, interruptAll, interruptCurrent, isQueued, type BotSdk, type BridgeModelInfo, type BridgeModelRef } from "../bot"
+import {
+  deliverMessage,
+  enqueue,
+  interruptAll,
+  interruptCurrent,
+  isQueued,
+  isSessionRunning,
+  type BotSdk,
+  type BridgeModelInfo,
+  type BridgeModelRef,
+} from "../bot"
 import { t } from "../i18n"
 
 export type BridgeOptions = {
@@ -15,8 +29,7 @@ export type BridgeOptions = {
 
 // OpencodeClient 的 .client 受保护, 通过结构接口桥接(SDK v2 均在运行时存在)。
 // 更新 SDK 生成代码后, BotSdk 里新增的方法需同步加入。
-const makeClient = (serverUrl: string): BotSdk =>
-  createOpencodeClient({ baseUrl: serverUrl }) as unknown as BotSdk
+const makeClient = (serverUrl: string): BotSdk => createOpencodeClient({ baseUrl: serverUrl }) as unknown as BotSdk
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -54,15 +67,60 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const sdk = makeClient(opts.serverUrl)
   const pending = new Map<string, Promise<Session | undefined>>()
   const checked = new Set<string>()
+  const generations = new Map<string, number>()
+  const currentDirectory = () => readState().workDir ?? opts.dir
+  const forgetSession = (key: string) => {
+    const stored = readState().sessions?.[key]
+    generations.set(key, (generations.get(key) ?? 0) + 1)
+    pending.delete(key)
+    if (stored) checked.delete(stored)
+    updateState((next) => {
+      if (next.sessions?.[key]) delete next.sessions[key]
+    })
+    return stored
+  }
+  const forgetAllSessions = () => {
+    const keys = new Set([...Object.keys(readState().sessions ?? {}), ...pending.keys()])
+    for (const key of keys) generations.set(key, (generations.get(key) ?? 0) + 1)
+    pending.clear()
+    checked.clear()
+    updateState((next) => {
+      next.sessions = {}
+    })
+  }
+  const switchDirectory = async (raw: string) => {
+    const input = raw.trim()
+    const unquoted =
+      input.length >= 2 &&
+      ((input.startsWith('"') && input.endsWith('"')) || (input.startsWith("'") && input.endsWith("'")))
+        ? input.slice(1, -1)
+        : input
+    const expanded =
+      unquoted === "~" ? homedir() : unquoted.startsWith("~/") ? path.join(homedir(), unquoted.slice(2)) : unquoted
+    const directory = path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(currentDirectory(), expanded)
+    const info = await stat(directory).catch(() => undefined)
+    if (!info) return { ok: false, directory: currentDirectory(), error: t("cmdDirectoryNotFound") }
+    if (!info.isDirectory()) return { ok: false, directory: currentDirectory(), error: t("cmdDirectoryNotDirectory") }
+    if (directory === currentDirectory()) return { ok: true, directory, changed: false }
+    await interruptAll(sdk)
+    forgetAllSessions()
+    updateState((next) => {
+      next.workDir = directory
+    })
+    opts.log(`AI 工作目录已切换: ${directory}`)
+    return { ok: true, directory, changed: true }
+  }
   const session: SessionFn = (key, model) => {
     const active = pending.get(key)
     if (active) return active.then((value) => (value ? { ...value, created: false } : value))
     const task = (async () => {
+      const generation = generations.get(key) ?? 0
       const stored = readState().sessions?.[key]
       if (stored && checked.has(stored)) return { id: stored, created: false }
       if (stored) {
         try {
           await sdk.v2.session.messages({ sessionID: stored, limit: 1, order: "desc" }, { throwOnError: true })
+          if ((generations.get(key) ?? 0) !== generation) return undefined
           checked.add(stored)
           return { id: stored, created: false }
         } catch (error) {
@@ -73,11 +131,15 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
         })
         opts.log(`旧会话已失效, 正在为 ${key} 自动重建`)
       }
-      const res = (await sdk.v2.session.create({ location: { directory: opts.dir }, model }, { throwOnError: true })) as {
+      const res = (await sdk.v2.session.create(
+        { location: { directory: currentDirectory() }, model },
+        { throwOnError: true },
+      )) as {
         data?: { data?: { id?: string } }
       }
       const id = res.data?.data?.id
       if (!id) return undefined
+      if ((generations.get(key) ?? 0) !== generation) return undefined
       checked.add(id)
       updateState((next) => {
         if (next.credential?.token !== cred.token) return
@@ -124,8 +186,10 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       accountId: cred.accountId,
       ownerUserId: cred.userId,
       msg,
-      text: messageText(msg),
       session,
+      forgetSession,
+      currentDirectory,
+      switchDirectory,
     })
       .then(() => {
         completed.add(key)
@@ -156,7 +220,13 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
     }
     let resp
     try {
-      resp = await getUpdates({ token: cred.token, baseUrl: cred.baseUrl, cursor, timeoutMs: timeout, signal: abort.signal })
+      resp = await getUpdates({
+        token: cred.token,
+        baseUrl: cred.baseUrl,
+        cursor,
+        timeoutMs: timeout,
+        signal: abort.signal,
+      })
     } catch (error) {
       if (!running) break
       if (readState().credential?.token !== cred.token) break
@@ -231,12 +301,15 @@ async function handleMessage(args: {
   accountId: string
   ownerUserId: string
   msg: WeixinMessage
-  text?: string
   session: SessionFn
+  forgetSession: (key: string) => string | undefined
+  currentDirectory: () => string
+  switchDirectory: (raw: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
 }) {
-  const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, text, session } = args
+  const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, session } = args
   const userKey = conversationKey(accountId, msg)
   const state = readState()
+  const text = messageText(msg)
 
   // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
   const ctxToken = msg.context_token!
@@ -244,7 +317,14 @@ async function handleMessage(args: {
     const clientId = `lychee-weixin:${Date.now()}-${randomUUID()}`
     for (let i = 0; i < 2; i++) {
       try {
-        await sendText({ token, baseUrl, toUserId: msg.from_user_id!, contextToken: ctxToken, text: replyText, clientId })
+        await sendText({
+          token,
+          baseUrl,
+          toUserId: msg.from_user_id!,
+          contextToken: ctxToken,
+          text: replyText,
+          clientId,
+        })
         try {
           updateState((next) => {
             if (next.health) {
@@ -265,30 +345,31 @@ async function handleMessage(args: {
     }
   }
 
-  if (!text) {
-    await reply(t("unsupported"))
-    return
-  }
-
   // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
   state.models = state.models ?? {}
-  const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split("/")
+  const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split(
+    "/",
+  )
   const defaultModel = defaultID ? { id: defaultID, providerID: defaultProvider } : undefined
   const model = state.models[userKey] ?? state.model ?? defaultModel
 
   // 聊天指令优先处理; /help、/autostart 等不再创建无用 AI 会话。
   if (
-    await handleChatCommand({
+    text &&
+    (await handleChatCommand({
       channel: "weixin",
       text,
       fromUserId: msg.from_user_id!,
       ownerUserId,
-      workDir: state.workDir ?? opts.dir,
+      workDir: args.currentDirectory(),
       reply,
       log: (m) => opts.log(m),
       models: {
         list: async () => {
-          const res = (await sdk.v2.model.list({ location: { directory: opts.dir } }, { throwOnError: true })) as {
+          const res = (await sdk.v2.model.list(
+            { location: { directory: args.currentDirectory() } },
+            { throwOnError: true },
+          )) as {
             data?: { data?: BridgeModelInfo[] }
           }
           return res.data?.data ?? []
@@ -310,7 +391,38 @@ async function handleMessage(args: {
           }
         },
       },
-    })
+      controls: {
+        newSession: async () => {
+          if (!state.models?.[userKey] && !state.model) return false
+          const stored = args.forgetSession(userKey)
+          if (stored) await interruptCurrent({ sdk, sessionID: stored, reply, log: (m) => opts.log(m), notify: false })
+          return Boolean(await session(userKey, model))
+        },
+        clearSession: async () => {
+          const stored = args.forgetSession(userKey)
+          if (!stored) return false
+          await interruptCurrent({ sdk, sessionID: stored, reply, log: (m) => opts.log(m), notify: false })
+          return true
+        },
+        stop: async () => {
+          const current = readState().sessions?.[userKey]
+          if (!current) return false
+          return interruptCurrent({ sdk, sessionID: current, reply, log: (m) => opts.log(m), notify: false })
+        },
+        status: async () => {
+          const current = readState()
+          const sessionID = current.sessions?.[userKey]
+          return {
+            directory: args.currentDirectory(),
+            model: current.models?.[userKey] ?? current.model,
+            sessionID,
+            running: sessionID ? isSessionRunning(sessionID) : false,
+          }
+        },
+        directory: async (next) =>
+          next ? args.switchDirectory(next) : { ok: true, directory: args.currentDirectory() },
+      },
+    }))
   ) {
     return
   }
@@ -318,6 +430,18 @@ async function handleMessage(args: {
   // 未配置模型的用户: 引导配置(指令如 /model 已在上方放行)
   if (!state.models[userKey] && !state.model) {
     await reply(t("needModelConfig"))
+    return
+  }
+
+  let prompt
+  try {
+    prompt = await messagePrompt(msg)
+  } catch (error) {
+    await reply(t("mediaFailed", { error: error instanceof Error ? error.message : String(error) }))
+    return
+  }
+  if (!prompt.text && !prompt.files.length) {
+    await reply(t("unsupported"))
     return
   }
 
@@ -335,13 +459,18 @@ async function handleMessage(args: {
 
   // 同一用户串行处理: 新消息在旧任务结束后执行
   await enqueue(userKey, async () => {
+    if (readState().sessions?.[userKey] !== sessionID) {
+      opts.log(`会话已切换, 跳过旧队列消息 (${sessionID})`)
+      return
+    }
     if (ready.created) await reply(t("created"))
     await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
     try {
       await deliverMessage({
         sdk,
         sessionID,
-        text,
+        text: prompt.text,
+        files: prompt.files,
         promptID: promptID(accountId, msg),
         model,
         reply: async (replyText) => {

@@ -168,7 +168,10 @@ const RunCommand: CommandModule = {
       console.error("未登录, 请先运行: OpenCode-Lychee weixin login")
       process.exit(1)
     }
-    const dir = String(argv.dir ?? state.workDir ?? process.cwd())
+    // launchd 可能仍带着安装时的旧 --dir；聊天内 /where 保存的新目录应在守护进程重启后继续生效。
+    const daemon = process.platform === "darwin" && process.ppid === 1
+    const dir = String(daemon ? (state.workDir ?? argv.dir ?? process.cwd()) : (argv.dir ?? state.workDir ?? process.cwd()))
+    if (state.workDir && state.workDir !== dir) state.sessions = {}
     state.workDir = dir
     writeState(state)
     if (!state.model) console.log("⚠️ 尚未配置默认模型, 微信发消息会被引导: 先运行 OpenCode-Lychee weixin configure")
