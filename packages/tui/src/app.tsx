@@ -859,7 +859,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "summary.toggle",
         title: kv.get("lychee_summary", false) ? t("cmd.summaryOff") : t("cmd.summaryOn"),
         category: "System",
-        slashName: "lycheexj",
+        slashName: "summary",
+        slashAliases: ["lycheexj"],
         run: () => {
           kv.set("lychee_summary", !kv.get("lychee_summary", false))
           dialog.clear()

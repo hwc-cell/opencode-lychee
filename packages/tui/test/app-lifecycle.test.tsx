@@ -115,11 +115,14 @@ test("app.exit prints the session epilogue after scoped cleanup", async () => {
     await ready
     await setup.renderOnce()
     await setup.renderOnce()
+    const summary = api?.keymap.getCommands().find((command) => command.name === "summary.toggle")
+    expect(summary?.slashName).toBe("summary")
+    expect(summary?.slashAliases).toEqual(["lycheexj"])
     api?.keymap.dispatchCommand("app.exit")
     await task
 
     expect(stdout).toContain("Demo session")
-    expect(stdout).toContain("opencode -s dummy")
+    expect(stdout).toContain("lychee -s dummy")
   } finally {
     process.stdout.write = originalWrite
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
