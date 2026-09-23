@@ -6,6 +6,7 @@
 - Do fork work on `branding-lychee`. The upstream default branch is `dev`; merge from `upstream/dev` while preserving Lychee-specific behavior.
 - The old checkout under `/Users/hwc/Documents/Harness Work/opencode-lychee` is legacy. Do not edit, launch, merge, or report status from it.
 - Product-specific additions include Chinese localization, the WeChat bridge, Lychee themes, summaries, Lychee Ledger cost export, and macOS voice input.
+- Durable theme palette decisions are recorded in `docs/lychee-theme-palettes.md`; keep TUI and desktop/Web theme IDs aligned with that file.
 - Lychee Ledger is only an external integration here. Do not edit the iOS or Android ledger repositories unless the user explicitly asks for a cross-project change.
 
 - To regenerate the legacy JavaScript SDK, run `./packages/sdk/js/script/build.ts`.

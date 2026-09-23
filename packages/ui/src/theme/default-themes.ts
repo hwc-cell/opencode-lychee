@@ -15,7 +15,10 @@ import flexokiThemeJson from "./themes/flexoki.json"
 import githubThemeJson from "./themes/github.json"
 import gruvboxThemeJson from "./themes/gruvbox.json"
 import kanagawaThemeJson from "./themes/kanagawa.json"
+import lycheeCeladonThemeJson from "./themes/lychee-celadon.json"
+import lycheeChinaRedThemeJson from "./themes/lychee-china-red.json"
 import lycheeClearSkyThemeJson from "./themes/lychee-clear-sky.json"
+import lycheeOsmanthusMoonThemeJson from "./themes/lychee-osmanthus-moon.json"
 import lycheeSodaThemeJson from "./themes/lychee-soda.json"
 import lucentOrngThemeJson from "./themes/lucent-orng.json"
 import materialThemeJson from "./themes/material.json"
@@ -55,7 +58,10 @@ export const flexokiTheme = flexokiThemeJson as DesktopTheme
 export const githubTheme = githubThemeJson as DesktopTheme
 export const gruvboxTheme = gruvboxThemeJson as DesktopTheme
 export const kanagawaTheme = kanagawaThemeJson as DesktopTheme
+export const lycheeCeladonTheme = lycheeCeladonThemeJson as DesktopTheme
+export const lycheeChinaRedTheme = lycheeChinaRedThemeJson as DesktopTheme
 export const lycheeClearSkyTheme = lycheeClearSkyThemeJson as DesktopTheme
+export const lycheeOsmanthusMoonTheme = lycheeOsmanthusMoonThemeJson as DesktopTheme
 export const lycheeSodaTheme = lycheeSodaThemeJson as DesktopTheme
 export const lucentOrngTheme = lucentOrngThemeJson as DesktopTheme
 export const materialTheme = materialThemeJson as DesktopTheme
@@ -96,7 +102,10 @@ export const DEFAULT_THEMES: Record<string, DesktopTheme> = {
   github: githubTheme,
   gruvbox: gruvboxTheme,
   kanagawa: kanagawaTheme,
+  "lychee-celadon": lycheeCeladonTheme,
+  "lychee-china-red": lycheeChinaRedTheme,
   "lychee-clear-sky": lycheeClearSkyTheme,
+  "lychee-osmanthus-moon": lycheeOsmanthusMoonTheme,
   "lychee-soda": lycheeSodaTheme,
   "lucent-orng": lucentOrngTheme,
   material: materialTheme,

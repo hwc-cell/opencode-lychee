@@ -14,6 +14,16 @@ describe("Lychee themes", () => {
     expect(clearSky).not.toBe(soda)
   })
 
+  test("registers the seasonal Lychee themes", () => {
+    expect(DEFAULT_THEMES["lychee-celadon"]?.name).toBe("Lychee Celadon")
+    expect(DEFAULT_THEMES["lychee-china-red"]?.name).toBe("Lychee China Red")
+    expect(DEFAULT_THEMES["lychee-osmanthus-moon"]?.name).toBe("Lychee Osmanthus Moon")
+
+    expect(resolveTheme(DEFAULT_THEMES["lychee-celadon"]!).light["background-base"]).toBe("#F5FAF8")
+    expect(resolveTheme(DEFAULT_THEMES["lychee-china-red"]!).light["background-base"]).toBe("#FFF8F3")
+    expect(resolveTheme(DEFAULT_THEMES["lychee-osmanthus-moon"]!).dark["background-base"]).toBe("#111827")
+  })
+
   test("keeps the Clear Sky light surface nearly white", () => {
     const theme = resolveTheme(DEFAULT_THEMES["lychee-clear-sky"]!)
 

@@ -44,17 +44,15 @@ test("resolveTheme rejects circular color refs", () => {
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
 })
 
-test("lychee blue themes are separate built-in themes", () => {
+test("lychee themes are separate built-in themes", () => {
   expect(DEFAULT_THEMES.lychee).toBeDefined()
-  expect(DEFAULT_THEMES["lychee-clear-sky"]).toBeDefined()
-  expect(DEFAULT_THEMES["lychee-soda"]).toBeDefined()
-  expect(DEFAULT_THEMES["lychee-clear-sky"]).not.toBe(DEFAULT_THEMES.lychee)
-  expect(DEFAULT_THEMES["lychee-soda"]).not.toBe(DEFAULT_THEMES.lychee)
-
-  expect(() => resolveTheme(DEFAULT_THEMES["lychee-clear-sky"]!, "light")).not.toThrow()
-  expect(() => resolveTheme(DEFAULT_THEMES["lychee-clear-sky"]!, "dark")).not.toThrow()
-  expect(() => resolveTheme(DEFAULT_THEMES["lychee-soda"]!, "light")).not.toThrow()
-  expect(() => resolveTheme(DEFAULT_THEMES["lychee-soda"]!, "dark")).not.toThrow()
+  const ids = ["lychee-celadon", "lychee-china-red", "lychee-clear-sky", "lychee-osmanthus-moon", "lychee-soda"]
+  for (const id of ids) {
+    expect(DEFAULT_THEMES[id]).toBeDefined()
+    expect(DEFAULT_THEMES[id]).not.toBe(DEFAULT_THEMES.lychee)
+    expect(() => resolveTheme(DEFAULT_THEMES[id]!, "light")).not.toThrow()
+    expect(() => resolveTheme(DEFAULT_THEMES[id]!, "dark")).not.toThrow()
+  }
 })
 
 function terminalColors(defaultBackground: string | null, palette: Array<string | null> = []): TerminalColors {
