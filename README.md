@@ -23,6 +23,7 @@ OpenCode-Lychee 在尽量保持 OpenCode v2 架构、会话引擎、插件系统
 | -------------- | ---------------------------------------------------------------------------------------- |
 | 微信聊天桥     | 扫码连接微信 iLink Bot，支持流式回复、媒体附件、会话控制、模型切换和 macOS 后台常驻      |
 | 荔枝小结       | `/summary`（兼容 `/lycheexj`）控制退出 TUI 时的中文会话小结，保存到 `.opencode/reports/` |
+| 成本记账       | `/autolychee` 可在退出 TUI 时把本次 AI 成本同步到荔枝记账                                |
 | 荔枝主题       | 荔枝、晴空、汽水、青瓷、中国红、桂月主题均为独立内置主题，不覆盖上游主题                 |
 | macOS 语音输入 | 按住左 Command 录音，松开后用本地 whisper.cpp 转写                                       |
 | 上游兼容       | 保留 OpenCode v2 CLI、后台服务、插件、模型与会话能力                                     |
@@ -90,6 +91,8 @@ OpenCode-Lychee weixin autostart   # macOS 后台常驻
 - `lychee-osmanthus-moon`
 
 输入 `/summary` 或 `/lycheexj` 开关荔枝小结。开启后退出 TUI 会生成中文 Markdown，小结保存在当前项目 `.opencode/reports/`。
+
+输入 `/ledger-key` 设置荔枝记账 API Key，再用 `/autolychee` 开关会话成本同步。Key 只保存在本机 `~/.local/state/opencode/ledger.json`，不会写入项目。
 
 ## macOS 语音输入
 
