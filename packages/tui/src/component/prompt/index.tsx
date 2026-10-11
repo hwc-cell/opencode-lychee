@@ -70,6 +70,7 @@ import { directoryRecentValue } from "../../prompt/directory-completion"
 import { useWorkingDirectoryActions } from "../../ui/working-directory-actions"
 import { truncateFilePath } from "../../ui/file-path"
 import { PromptMetadataRow } from "./metadata"
+import { toggleVoiceRecording, useVoiceDictation, voiceToolInstalled } from "../../util/voice"
 
 export type PromptProps = {
   sessionID?: string
@@ -367,6 +368,15 @@ export function Prompt(props: PromptProps) {
     extmarkToPart: new Map(),
     interrupt: 0,
   })
+  const { voice } = useVoiceDictation((text) => {
+    if (!input || input.isDestroyed) return
+    const prefix = input.plainText && !input.plainText.endsWith(" ") && !input.plainText.endsWith("\n") ? " " : ""
+    input.insertText(prefix + text)
+    setStore("prompt", "text", input.plainText)
+    input.gotoBufferEnd()
+    renderer.requestRender()
+  })
+  const showVoice = createMemo(voiceToolInstalled)
   let disposed = false
   let pasteQueue = Promise.resolve()
 
@@ -425,6 +435,14 @@ export function Prompt(props: PromptProps) {
           clearPrompt()
           dialog.clear()
         },
+      },
+      {
+        title: "Voice dictation",
+        name: "prompt.voice",
+        category: "Prompt",
+        bind: "ctrl+r",
+        enabled: showVoice(),
+        run: () => toggleVoiceRecording(voice()),
       },
       {
         title: "Submit prompt",
@@ -1941,6 +1959,24 @@ export function Prompt(props: PromptProps) {
                 </Switch>
               </box>
             </Slot>
+            <Show when={showVoice()}>
+              <text
+                fg={
+                  voice()?.state === "error"
+                    ? theme.text.feedback.error.base
+                    : voice()?.state === "recording"
+                      ? theme.text.action.primary.base
+                      : theme.text.muted
+                }
+                wrapMode="none"
+              >
+                {voice()?.state === "recording"
+                  ? "🎙️ 录音中 · ctrl+r 停止"
+                  : voice()?.state === "error"
+                    ? "🎤 语音权限异常"
+                    : "🎤 ctrl+r 语音"}
+              </text>
+            </Show>
             <Slot path="prompt.footer.file" input={footerInput()}>
               <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
                 {(file) => (

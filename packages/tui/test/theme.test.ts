@@ -46,9 +46,7 @@ test("decodes native V2 themes lazily once", () => {
 })
 
 test("rejects invalid V2 themes when parsing", () => {
-  expect(() => parseTheme({ light: { categorical: [] } }, "invalid-v2")).toThrow(
-    "Invalid theme: invalid-v2",
-  )
+  expect(() => parseTheme({ light: { categorical: [] } }, "invalid-v2")).toThrow("Invalid theme: invalid-v2")
 })
 
 test("rejects invalid V1 themes when parsing", () => {
@@ -73,6 +71,16 @@ test("replacement sources receive independent parse caches", () => {
 test("hasTheme checks theme presence", () => {
   expect(hasTheme("missing-theme")).toBe(false)
   expect(hasTheme("opencode")).toBe(true)
+})
+
+test("registers every Lychee theme independently", () => {
+  const themes = allThemes()
+  expect(themes.lychee).toBeDefined()
+  for (const id of ["lychee-celadon", "lychee-china-red", "lychee-clear-sky", "lychee-osmanthus-moon", "lychee-soda"]) {
+    expect(themes[id]).toBeDefined()
+    expect(themes[id]).not.toBe(themes.lychee)
+    expect(() => parseTheme(themes[id]!, id)).not.toThrow()
+  }
 })
 
 test("resolveTheme rejects circular color refs", () => {

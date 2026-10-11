@@ -1,0 +1,522 @@
+import { OpenCode } from "@opencode/client"
+import { randomUUID } from "node:crypto"
+import { stat } from "node:fs/promises"
+import { homedir } from "node:os"
+import path from "node:path"
+import { chunkText, getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
+import { conversationKey, messageKey, promptID } from "./keys"
+import { messagePrompt } from "./media"
+import { readState, updateState } from "./state"
+import { handleChatCommand } from "../commands"
+import {
+  deliverMessage,
+  enqueue,
+  interruptAll,
+  interruptCurrent,
+  isQueued,
+  isSessionRunning,
+  type BotSdk,
+  type BridgeModelInfo,
+  type BridgeModelRef,
+} from "../bot"
+import { t } from "../i18n"
+
+export type BridgeOptions = {
+  serverUrl: string
+  headers?: HeadersInit
+  dir: string
+  log: (msg: string) => string | void
+}
+
+const makeClient = (serverUrl: string, headers?: HeadersInit): BotSdk => {
+  const client = OpenCode.make({ baseUrl: serverUrl, headers })
+  return {
+    v2: {
+      model: {
+        list: async (input) => ({ data: { data: (await client.model.list(input)).data } }),
+      },
+      session: {
+        create: async (input) => ({
+          data: {
+            data: await client.session.create({
+              ...input,
+              location: input?.location?.directory ? { directory: input.location.directory } : undefined,
+            }),
+          },
+        }),
+        prompt: async (input) => ({
+          data: {
+            data: await client.session.prompt({
+              sessionID: input.sessionID,
+              id: input.id,
+              text: input.prompt?.text ?? "",
+              files: input.prompt?.files,
+              delivery: input.delivery,
+            }),
+          },
+        }),
+        switchModel: (input) => client.session.switchModel(input),
+        wait: (input) => client.session.wait(input),
+        interrupt: (input) => client.session.interrupt(input),
+        messages: async (input) => ({ data: { data: (await client.message.list(input)).data } }),
+      },
+    },
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+type Session = { id: string; created: boolean }
+type SessionFn = (key: string, model?: BridgeModelRef) => Promise<Session | undefined>
+
+function statusCode(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return
+  const direct = (error as { status?: unknown }).status
+  if (typeof direct === "number") return direct
+  const cause = (error as { cause?: unknown }).cause
+  if (!cause || typeof cause !== "object") return
+  const status = (cause as { status?: unknown }).status
+  return typeof status === "number" ? status : undefined
+}
+
+function health(status: NonNullable<ReturnType<typeof readState>["health"]>["status"], error?: string) {
+  const now = new Date().toISOString()
+  updateState((state) => {
+    state.health = {
+      ...state.health,
+      status,
+      pid: status === "stopped" || status === "expired" ? undefined : process.pid,
+      updatedAt: now,
+      startedAt: status === "starting" ? now : (state.health?.startedAt ?? now),
+      lastError: error,
+    }
+  })
+}
+
+export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
+  const state = readState()
+  const cred = state.credential
+  if (!cred) throw new Error("未登录: 请先运行 OpenCode-Lychee weixin login")
+  const sdk = makeClient(opts.serverUrl, opts.headers)
+  const pending = new Map<string, Promise<Session | undefined>>()
+  const checked = new Set<string>()
+  const generations = new Map<string, number>()
+  const currentDirectory = () => readState().workDir ?? opts.dir
+  const forgetSession = (key: string) => {
+    const stored = readState().sessions?.[key]
+    generations.set(key, (generations.get(key) ?? 0) + 1)
+    pending.delete(key)
+    if (stored) checked.delete(stored)
+    updateState((next) => {
+      if (next.sessions?.[key]) delete next.sessions[key]
+    })
+    return stored
+  }
+  const forgetAllSessions = () => {
+    const keys = new Set([...Object.keys(readState().sessions ?? {}), ...pending.keys()])
+    for (const key of keys) generations.set(key, (generations.get(key) ?? 0) + 1)
+    pending.clear()
+    checked.clear()
+    updateState((next) => {
+      next.sessions = {}
+    })
+  }
+  const switchDirectory = async (raw: string) => {
+    const input = raw.trim()
+    const unquoted =
+      input.length >= 2 &&
+      ((input.startsWith('"') && input.endsWith('"')) || (input.startsWith("'") && input.endsWith("'")))
+        ? input.slice(1, -1)
+        : input
+    const expanded =
+      unquoted === "~" ? homedir() : unquoted.startsWith("~/") ? path.join(homedir(), unquoted.slice(2)) : unquoted
+    const directory = path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(currentDirectory(), expanded)
+    const info = await stat(directory).catch(() => undefined)
+    if (!info) return { ok: false, directory: currentDirectory(), error: t("cmdDirectoryNotFound") }
+    if (!info.isDirectory()) return { ok: false, directory: currentDirectory(), error: t("cmdDirectoryNotDirectory") }
+    if (directory === currentDirectory()) return { ok: true, directory, changed: false }
+    await interruptAll(sdk)
+    forgetAllSessions()
+    updateState((next) => {
+      next.workDir = directory
+    })
+    opts.log(`AI 工作目录已切换: ${directory}`)
+    return { ok: true, directory, changed: true }
+  }
+  const session: SessionFn = (key, model) => {
+    const active = pending.get(key)
+    if (active) return active.then((value) => (value ? { ...value, created: false } : value))
+    const task = (async () => {
+      const generation = generations.get(key) ?? 0
+      const stored = readState().sessions?.[key]
+      if (stored && checked.has(stored)) return { id: stored, created: false }
+      if (stored) {
+        try {
+          await sdk.v2.session.messages({ sessionID: stored, limit: 1, order: "desc" }, { throwOnError: true })
+          if ((generations.get(key) ?? 0) !== generation) return undefined
+          checked.add(stored)
+          return { id: stored, created: false }
+        } catch (error) {
+          if (statusCode(error) !== 404) throw error
+        }
+        updateState((next) => {
+          if (next.sessions?.[key] === stored) delete next.sessions[key]
+        })
+        opts.log(`旧会话已失效, 正在为 ${key} 自动重建`)
+      }
+      const res = (await sdk.v2.session.create(
+        { location: { directory: currentDirectory() }, model },
+        { throwOnError: true },
+      )) as {
+        data?: { data?: { id?: string } }
+      }
+      const id = res.data?.data?.id
+      if (!id) return undefined
+      if ((generations.get(key) ?? 0) !== generation) return undefined
+      checked.add(id)
+      updateState((next) => {
+        if (next.credential?.token !== cred.token) return
+        next.sessions = next.sessions ?? {}
+        next.sessions[key] = id
+      })
+      return { id, created: true }
+    })().catch((error) => {
+      opts.log(`会话准备失败 (${key}): ${error instanceof Error ? error.message : error}`)
+      return undefined
+    })
+    pending.set(key, task)
+    const clear = () => {
+      if (pending.get(key) === task) pending.delete(key)
+    }
+    void task.then(clear, clear)
+    return task
+  }
+  let running = true
+  const abort = new AbortController()
+  const stop = () => {
+    running = false
+    abort.abort()
+    void interruptAll(sdk)
+  }
+  process.on("SIGINT", stop)
+  process.on("SIGTERM", stop)
+  health("starting")
+
+  let cursor = state.cursor ?? ""
+  let timeout = 45_000
+  // getupdates 可能重复推送。inFlight 防止并发重复处理，completed 覆盖游标切换期间的短暂重复。
+  const inFlight = new Set<string>()
+  const completed = new Set<string>()
+  const handlers = new Set<Promise<void>>()
+  const schedule = (key: string, msg: WeixinMessage) => {
+    if (inFlight.has(key) || completed.has(key)) return
+    inFlight.add(key)
+    const task = handleMessage({
+      opts,
+      sdk,
+      token: cred.token,
+      baseUrl: cred.baseUrl,
+      accountId: cred.accountId,
+      ownerUserId: cred.userId,
+      msg,
+      session,
+      forgetSession,
+      currentDirectory,
+      switchDirectory,
+    })
+      .then(() => {
+        completed.add(key)
+        if (completed.size > 2000) completed.delete(completed.values().next().value!)
+        updateState((next) => {
+          if (next.credential?.token !== cred.token || !next.inbox) return
+          delete next.inbox[key]
+          if (Object.keys(next.inbox).length === 0) delete next.inbox
+        })
+      })
+      .catch((error) => {
+        opts.log(`消息处理失败, 已保留待重试 (${key}): ${error instanceof Error ? error.message : error}`)
+      })
+      .finally(() => {
+        inFlight.delete(key)
+        handlers.delete(task)
+      })
+    handlers.add(task)
+  }
+
+  for (const [key, msg] of Object.entries(state.inbox ?? {})) schedule(key, msg)
+  opts.log(`微信 Bot 已启动 (${cred.accountId}), 等待消息… (Ctrl+C 停止)`)
+
+  while (running) {
+    if (readState().credential?.token !== cred.token) {
+      opts.log("检测到登录凭证已更新, 当前桥即将退出并由后台服务重新加载")
+      break
+    }
+    let resp
+    try {
+      resp = await getUpdates({
+        token: cred.token,
+        baseUrl: cred.baseUrl,
+        cursor,
+        timeoutMs: timeout,
+        signal: abort.signal,
+      })
+    } catch (error) {
+      if (!running) break
+      if (readState().credential?.token !== cred.token) break
+      const message = error instanceof Error ? error.message : String(error)
+      health("offline", message)
+      opts.log(`轮询失败: ${message} — 2s 后重试`)
+      await sleep(2000)
+      continue
+    }
+    if (readState().credential?.token !== cred.token) break
+    if (resp.ret === -14) {
+      updateState((next) => {
+        next.cursor = ""
+        next.contexts = {}
+      })
+      health("expired", "微信登录已失效(-14), 请重新扫码")
+      opts.log("⚠️ 微信登录已失效(-14), 已停止轮询; 请运行 OpenCode-Lychee weixin login 重新扫码")
+      break
+    }
+    if (resp.ret !== 0) {
+      health("offline", `getupdates ret=${resp.ret}`)
+      opts.log(`getupdates ret=${resp.ret}, 30s 后重试`)
+      await sleep(30000)
+      continue
+    }
+    health("online")
+    if (resp.longpolling_timeout_ms) timeout = resp.longpolling_timeout_ms + 10_000
+    const incoming = (resp.msgs ?? []).filter(
+      (msg) => msg.message_type === 1 && Boolean(msg.from_user_id) && Boolean(msg.context_token),
+    )
+    const nextCursor = resp.get_updates_buf || cursor
+    if (nextCursor !== cursor || incoming.length > 0) {
+      updateState((next) => {
+        if (next.credential?.token !== cred.token) return
+        next.cursor = nextCursor
+        next.inbox = next.inbox ?? {}
+        next.contexts = next.contexts ?? {}
+        const now = new Date().toISOString()
+        for (const msg of incoming) {
+          const key = messageKey(cred.accountId, msg)
+          next.inbox[key] = next.inbox[key] ?? msg
+          next.contexts[conversationKey(cred.accountId, msg)] = msg.context_token!
+        }
+        if (incoming.length > 0 && next.health) {
+          next.health.updatedAt = now
+          next.health.lastInboundAt = now
+        }
+      })
+      cursor = nextCursor
+    }
+    for (const msg of incoming) {
+      const text = messageText(msg)
+      if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
+    }
+    // 只按持久化 inbox 的插入顺序调度，失败的旧消息不会被刚收到的新消息插队。
+    for (const [key, msg] of Object.entries(readState().inbox ?? {})) schedule(key, msg)
+  }
+  await interruptAll(sdk)
+  await Promise.race([Promise.allSettled([...handlers]), sleep(10_000)])
+  process.off("SIGINT", stop)
+  process.off("SIGTERM", stop)
+  const last = readState().health
+  if (last?.status !== "expired" && last?.pid === process.pid) health("stopped")
+  opts.log("桥已停止")
+}
+
+async function handleMessage(args: {
+  opts: BridgeOptions
+  sdk: BotSdk
+  token: string
+  baseUrl: string
+  accountId: string
+  ownerUserId: string
+  msg: WeixinMessage
+  session: SessionFn
+  forgetSession: (key: string) => string | undefined
+  currentDirectory: () => string
+  switchDirectory: (raw: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
+}) {
+  const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, session } = args
+  const userKey = conversationKey(accountId, msg)
+  const state = readState()
+  const text = messageText(msg)
+
+  // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
+  const ctxToken = msg.context_token!
+  const reply = async (replyText: string) => {
+    const clientId = `lychee-weixin:${Date.now()}-${randomUUID()}`
+    for (let i = 0; i < 2; i++) {
+      try {
+        await sendText({
+          token,
+          baseUrl,
+          toUserId: msg.from_user_id!,
+          contextToken: ctxToken,
+          text: replyText,
+          clientId,
+        })
+        try {
+          updateState((next) => {
+            if (next.health) {
+              next.health.updatedAt = new Date().toISOString()
+              next.health.lastOutboundAt = next.health.updatedAt
+            }
+          })
+        } catch (error) {
+          // 消息已经成功发出，健康状态落盘失败不能触发重发。
+          opts.log(`发送成功但状态保存失败: ${error instanceof Error ? error.message : error}`)
+        }
+        return
+      } catch (error) {
+        opts.log(`发送失败(第${i + 1}次): ${error instanceof Error ? error.message : error}`)
+        if (i === 1) throw error
+        await sleep(500)
+      }
+    }
+  }
+
+  // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
+  state.models = state.models ?? {}
+  const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split(
+    "/",
+  )
+  const defaultModel = defaultID ? { id: defaultID, providerID: defaultProvider } : undefined
+  const model = state.models[userKey] ?? state.model ?? defaultModel
+
+  // 聊天指令优先处理; /help、/autostart 等不再创建无用 AI 会话。
+  if (
+    text &&
+    (await handleChatCommand({
+      channel: "weixin",
+      text,
+      fromUserId: msg.from_user_id!,
+      ownerUserId,
+      workDir: args.currentDirectory(),
+      reply,
+      log: (m) => opts.log(m),
+      models: {
+        list: async () => {
+          const res = (await sdk.v2.model.list(
+            { location: { directory: args.currentDirectory() } },
+            { throwOnError: true },
+          )) as {
+            data?: { data?: BridgeModelInfo[] }
+          }
+          return res.data?.data ?? []
+        },
+        switchModel: async (next) => {
+          const ready = await session(userKey, next)
+          if (!ready) return false
+          try {
+            await sdk.v2.session.switchModel({ sessionID: ready.id, model: next }, { throwOnError: true })
+            updateState((current) => {
+              if (current.credential?.token !== token) return
+              current.models = current.models ?? {}
+              current.models[userKey] = next
+            })
+            return true
+          } catch (error) {
+            opts.log(`/model 切换失败: ${error instanceof Error ? error.message : error}`)
+            return false
+          }
+        },
+      },
+      controls: {
+        newSession: async () => {
+          if (!state.models?.[userKey] && !state.model) return false
+          const stored = args.forgetSession(userKey)
+          if (stored) await interruptCurrent({ sdk, sessionID: stored, reply, log: (m) => opts.log(m), notify: false })
+          return Boolean(await session(userKey, model))
+        },
+        clearSession: async () => {
+          const stored = args.forgetSession(userKey)
+          if (!stored) return false
+          await interruptCurrent({ sdk, sessionID: stored, reply, log: (m) => opts.log(m), notify: false })
+          return true
+        },
+        stop: async () => {
+          const current = readState().sessions?.[userKey]
+          if (!current) return false
+          return interruptCurrent({ sdk, sessionID: current, reply, log: (m) => opts.log(m), notify: false })
+        },
+        status: async () => {
+          const current = readState()
+          const sessionID = current.sessions?.[userKey]
+          return {
+            directory: args.currentDirectory(),
+            model: current.models?.[userKey] ?? current.model,
+            sessionID,
+            running: sessionID ? isSessionRunning(sessionID) : false,
+          }
+        },
+        directory: async (next) =>
+          next ? args.switchDirectory(next) : { ok: true, directory: args.currentDirectory() },
+      },
+    }))
+  ) {
+    return
+  }
+
+  // 未配置模型的用户: 引导配置(指令如 /model 已在上方放行)
+  if (!state.models[userKey] && !state.model) {
+    await reply(t("needModelConfig"))
+    return
+  }
+
+  let prompt
+  try {
+    prompt = await messagePrompt(msg)
+  } catch (error) {
+    await reply(t("mediaFailed", { error: error instanceof Error ? error.message : String(error) }))
+    return
+  }
+  if (!prompt.text && !prompt.files.length) {
+    await reply(t("unsupported"))
+    return
+  }
+
+  const ready = await session(userKey, model)
+  if (!ready) {
+    await reply(t("noSession"))
+    return
+  }
+  const sessionID = ready.id
+
+  // 新消息打断正在运行的旧任务(通知由核心发出)
+  if (isQueued(userKey)) {
+    await interruptCurrent({ sdk, sessionID, reply, log: (m) => opts.log(m) })
+  }
+
+  // 同一用户串行处理: 新消息在旧任务结束后执行
+  await enqueue(userKey, async () => {
+    if (readState().sessions?.[userKey] !== sessionID) {
+      opts.log(`会话已切换, 跳过旧队列消息 (${sessionID})`)
+      return
+    }
+    if (ready.created) await reply(t("created"))
+    await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
+    try {
+      await deliverMessage({
+        sdk,
+        sessionID,
+        text: prompt.text,
+        files: prompt.files,
+        promptID: promptID(accountId, msg),
+        model,
+        reply: async (replyText) => {
+          const chunks = chunkText(replyText, 1990)
+          for (let i = 0; i < chunks.length; i++) {
+            const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length}) ` : ""
+            await reply(prefix + chunks[i])
+          }
+        },
+        log: (m) => opts.log(m),
+      })
+    } finally {
+      await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 2 })
+    }
+  })
+}

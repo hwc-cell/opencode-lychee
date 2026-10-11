@@ -1,3 +1,14 @@
+# OpenCode-Lychee project identity
+
+- Canonical checkout: `/Users/hwc/Documents/Codex Work/opencode-lychee`.
+- This repository is the Chinese OpenCode-Lychee fork, not Lychee Ledger and not Hermes Lychee.
+- `origin` is the user's fork (`hwc-cell/opencode-lychee`); `upstream` is the original OpenCode repository (`anomalyco/opencode`).
+- Fork work belongs on `branding-lychee`; merge from `upstream/dev` while preserving Lychee-specific behavior.
+- Never use the legacy checkout under `/Users/hwc/Documents/Harness Work/opencode-lychee`.
+- Fork features include Chinese UX, the WeChat bridge, Lychee themes, summaries, cost export, and macOS voice input.
+- Keep TUI and desktop/Web theme IDs aligned with `docs/lychee-theme-palettes.md`.
+- Lychee Ledger is an external integration only. Do not edit Ledger repositories without an explicit cross-project request.
+
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit generated client files directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk` composes Client, Core, and Server.
 - Current implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required.

@@ -306,6 +306,45 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       description: "List all available models",
       params: ServerParams,
     }),
+    Spec.make("weixin", {
+      description: "Connect OpenCode to a WeChat iLink Bot",
+      commands: [
+        Spec.make("login", {
+          description: "Sign in to a WeChat Bot by scanning a QR code",
+          params: ServerParams,
+        }),
+        Spec.make("configure", {
+          description: "Choose the default model used by WeChat",
+          params: ServerParams,
+        }),
+        Spec.make("run", {
+          description: "Run the WeChat message bridge",
+          params: {
+            ...ServerParams,
+            dir: Flag.String("dir").pipe(
+              Flag.withDescription("AI working directory (defaults to the last saved directory)"),
+              Flag.optional,
+            ),
+          },
+        }),
+        Spec.make("status", { description: "Show WeChat login and bridge status" }),
+        Spec.make("autostart", { description: "Install the macOS background bridge" }),
+        Spec.make("autostop", { description: "Remove the macOS background bridge" }),
+        Spec.make("logout", { description: "Sign out and clear local WeChat bridge state" }),
+      ],
+    }),
+    Spec.make("voice", {
+      description: "Manage Lychee voice dictation on macOS",
+      params: {
+        action: Argument.Literals("action", ["install", "authorize", "start", "stop", "status", "test"]).pipe(
+          Argument.withDescription("Voice dictation action"),
+        ),
+        model: Flag.Literals("model", ["tiny", "base", "small"]).pipe(
+          Flag.withDescription("Whisper model size"),
+          Flag.withDefault("base"),
+        ),
+      },
+    }),
     Spec.make("stats", {
       description: "Show shareable usage statistics",
       params: {

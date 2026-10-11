@@ -1,129 +1,115 @@
+<h1 align="center">OpenCode-Lychee 🍈</h1>
+
 <p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
+  <strong>面向中文开发者的 OpenCode 社区衍生版</strong><br>
+  基于 OpenCode v2，加入微信桥、荔枝主题、会话小结与 macOS 语音输入
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="使用说明.md">完整使用说明</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="使用说明.md#tui-navigation">快捷键与跳转</a> ·
+  <a href="使用说明.md#wechat">微信接入</a> ·
+  <a href="https://github.com/anomalyco/opencode">上游 OpenCode</a>
 </p>
-
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 ---
 
-### Installation
+OpenCode-Lychee 在尽量保持 OpenCode v2 架构、会话引擎、插件系统和模型兼容性的前提下，增加适合中文日常使用的扩展。它是社区维护的 fork，并非 OpenCode、腾讯或微信的官方发行版。
+
+## 主要功能
+
+| 功能           | 说明                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| 微信聊天桥     | 扫码连接微信 iLink Bot，支持流式回复、媒体附件、会话控制、模型切换和 macOS 后台常驻      |
+| 荔枝小结       | `/summary`（兼容 `/lycheexj`）控制退出 TUI 时的中文会话小结，保存到 `.opencode/reports/` |
+| 荔枝主题       | 荔枝、晴空、汽水、青瓷、中国红、桂月主题均为独立内置主题，不覆盖上游主题                 |
+| macOS 语音输入 | 按住左 Command 录音，松开后用本地 whisper.cpp 转写                                       |
+| 上游兼容       | 保留 OpenCode v2 CLI、后台服务、插件、模型与会话能力                                     |
+
+## 快速开始
+
+需要 Git 和 [Bun](https://bun.sh/)；仓库当前声明的 Bun 版本见根目录 `package.json`。
 
 ```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
+git clone https://github.com/hwc-cell/opencode-lychee.git
+cd opencode-lychee
+bun install
+bun run dev
 ```
 
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
+### 安装快捷命令
 
-### Desktop App (BETA)
-
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
-
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
+在仓库根目录执行：
 
 ```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
+mkdir -p ~/.local/bin
+ln -sfn "$PWD/packages/cli/lychee.sh" ~/.local/bin/OpenCode-Lychee
+ln -sfn "$PWD/packages/cli/lychee.sh" ~/.local/bin/lychee
 ```
 
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
+随后进入任意项目目录运行：
 
 ```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
+OpenCode-Lychee
 ```
 
-### Agents
+启动器直接链接当前源码仓库；移动仓库后需要重新创建链接。它默认关闭上游自动更新，避免官方包覆盖 fork 功能。
 
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
+## 微信接入
 
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
+```bash
+OpenCode-Lychee weixin login
+OpenCode-Lychee weixin configure
+OpenCode-Lychee weixin autostart   # macOS 后台常驻
+```
 
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
+非 macOS 可使用 `OpenCode-Lychee weixin run` 前台运行。常用管理命令：
 
-Learn more about [agents](https://opencode.ai/docs/agents).
+| 命令                            | 用途                             |
+| ------------------------------- | -------------------------------- |
+| `weixin run`                    | 启动聊天桥                       |
+| `weixin status`                 | 查看登录、常驻服务和连接状态     |
+| `weixin configure`              | 选择默认模型与思考强度           |
+| `weixin autostart` / `autostop` | 安装或移除 macOS 常驻服务        |
+| `weixin logout`                 | 清除本地微信登录、会话和连接状态 |
 
-### Documentation
+微信内支持 `/model`、`/new`、`/clear`、`/stop`、`/status`、`/where`、`/autostart`、`/autostop` 和 `/help`。媒体只从受信任的微信 CDN 下载并在内存中解密；默认单附件 10MB、单消息合计 20MB。
 
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+微信登录凭证保存在 `~/.local/state/opencode/weixin.json`。不要提交、截图或分享 API Key、登录凭证、加密密钥和状态文件。
 
-### Contributing
+## 主题与小结
 
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
+在 TUI 中使用 `/themes` 选择：
 
-### Building on OpenCode
+- `lychee`
+- `lychee-clear-sky`
+- `lychee-soda`
+- `lychee-celadon`
+- `lychee-china-red`
+- `lychee-osmanthus-moon`
 
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+输入 `/summary` 或 `/lycheexj` 开关荔枝小结。开启后退出 TUI 会生成中文 Markdown，小结保存在当前项目 `.opencode/reports/`。
 
----
+## macOS 语音输入
 
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+```bash
+OpenCode-Lychee voice install
+OpenCode-Lychee voice authorize
+OpenCode-Lychee voice test
+```
+
+安装会使用 `whisper.cpp` 并下载本地模型；需要 Xcode Command Line Tools、麦克风权限与辅助功能权限。可通过 `--model tiny|base|small` 选择模型。
+
+## 更多说明
+
+- [完整使用说明](使用说明.md)：安装、页面跳转、命令、快捷键、微信、主题、语音和排错。
+- [微信桥开发说明](packages/bridge/README.md)
+- [荔枝主题色板](docs/lychee-theme-palettes.md)
+- [上游 OpenCode 文档](https://opencode.ai/docs)
+
+## 与上游的关系
+
+本项目持续跟进 [anomalyco/opencode](https://github.com/anomalyco/opencode) 的 `dev` 分支。OpenCode 的配置、插件和模型文档通常仍适用；荔枝扩展以本仓库说明为准。
+
+本 fork 保留上游 MIT 协议与版权声明，详见 [LICENSE](LICENSE)。
