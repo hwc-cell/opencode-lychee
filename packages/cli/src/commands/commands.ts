@@ -328,6 +328,12 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
           },
         }),
         Spec.make("status", { description: "Show WeChat login and bridge status" }),
+        Spec.make("doctor", {
+          description: "Check WeChat bridge setup and AI service without starting or sending messages",
+          params: {
+            server: Flag.String("server").pipe(Flag.withDescription("OpenCode server URL to check"), Flag.optional),
+          },
+        }),
         Spec.make("autostart", { description: "Install the macOS background bridge" }),
         Spec.make("autostop", { description: "Remove the macOS background bridge" }),
         Spec.make("logout", { description: "Sign out and clear local WeChat bridge state" }),

@@ -31,6 +31,7 @@ export type WeixinState = {
   models?: Record<string, { id: string; providerID: string; variant?: string }>
   // 默认模型(OpenCode-Lychee weixin configure 配置; 未配置时微信发消息会被引导配置)
   model?: { id: string; providerID: string; variant?: string }
+  busyModes?: Record<string, "queue" | "interrupt">
   health?: {
     status: "starting" | "online" | "offline" | "expired" | "stopped"
     pid?: number

@@ -64,6 +64,7 @@ const Handlers = Runtime.handlers(Commands, {
     configure: () => import("./commands/handlers/weixin/configure"),
     run: () => import("./commands/handlers/weixin/run"),
     status: () => import("./commands/handlers/weixin/status"),
+    doctor: () => import("./commands/handlers/weixin/doctor"),
     autostart: () => import("./commands/handlers/weixin/autostart"),
     autostop: () => import("./commands/handlers/weixin/autostop"),
     logout: () => import("./commands/handlers/weixin/logout"),

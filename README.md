@@ -71,6 +71,7 @@ OpenCode-Lychee weixin autostart   # macOS 后台常驻
 | ------------------------------- | -------------------------------- |
 | `weixin run`                    | 启动聊天桥                       |
 | `weixin status`                 | 查看登录、常驻服务和连接状态     |
+| `weixin doctor`                 | 自检目录、后台桥、AI 服务和模型  |
 | `weixin configure`              | 选择默认模型与思考强度           |
 | `weixin autostart` / `autostop` | 安装或移除 macOS 常驻服务        |
 | `weixin logout`                 | 清除本地微信登录、会话和连接状态 |

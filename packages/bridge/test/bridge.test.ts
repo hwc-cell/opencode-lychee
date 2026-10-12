@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createCipheriv } from "node:crypto"
-import { deliverMessage, enqueue, isQueued, type BotSdk } from "../src/bot"
+import { cancelQueued, deliverMessage, enqueue, isQueued, readTurnResponse, type BotSdk } from "../src/bot"
 import { handleChatCommand } from "../src/commands"
 import { chunkText, loginUntilConfirmed, messageText, sendText, sendTyping } from "../src/weixin/client"
 import { conversationKey, messageKey } from "../src/weixin/keys"
 import { decodeMediaKey, messagePrompt } from "../src/weixin/media"
 
 const fetch = globalThis.fetch
+
+function turnRows(promptID: string, text: string) {
+  return {
+    data: {
+      data: [
+        { id: "msg_reply", type: "assistant", content: [{ type: "text", text }] },
+        { id: promptID, type: "user" },
+      ],
+    },
+  }
+}
 
 afterEach(() => {
   globalThis.fetch = fetch
@@ -39,7 +50,7 @@ describe("queue", () => {
           interrupt: async () => ({}),
           messages: async (args: { order?: "asc" | "desc" }) => {
             orders.push(args.order ?? "")
-            return { data: { data: [{ type: "assistant", content: [{ type: "text", text: "latest" }] }] } }
+            return turnRows("msg_current", "latest")
           },
         },
       },
@@ -50,6 +61,7 @@ describe("queue", () => {
       sdk,
       sessionID: "session",
       text: "hello",
+      promptID: "msg_current",
       reply: async (text) => {
         replies.push(text)
       },
@@ -80,14 +92,19 @@ describe("queue", () => {
             return {}
           },
           interrupt: async () => ({}),
-          messages: async () => ({
-            data: { data: [{ type: "assistant", content: [{ type: "text", text: "done" }] }] },
-          }),
+          messages: async () => turnRows("msg_current", "done"),
         },
       },
     } as BotSdk
 
-    await deliverMessage({ sdk, sessionID: "session", text: "hello", reply: async () => {}, log: () => {} })
+    await deliverMessage({
+      sdk,
+      sessionID: "session",
+      promptID: "msg_current",
+      text: "hello",
+      reply: async () => {},
+      log: () => {},
+    })
     expect(prompts).toBe(1)
     expect(waits).toBe(2)
   })
@@ -107,9 +124,7 @@ describe("queue", () => {
           switchModel: async () => ({}),
           wait: async () => ({}),
           interrupt: async () => ({}),
-          messages: async () => ({
-            data: { data: [{ type: "assistant", content: [{ type: "text", text: "done" }] }] },
-          }),
+          messages: async () => turnRows("msg_stable", "done"),
         },
       },
     } as BotSdk
@@ -139,15 +154,21 @@ describe("queue", () => {
           switchModel: async () => ({}),
           wait: async () => ({}),
           interrupt: async () => ({}),
-          messages: async () => ({
-            data: { data: [{ type: "assistant", content: [{ type: "text", text: "done" }] }] },
-          }),
+          messages: async () => turnRows("msg_current", "done"),
         },
       },
     } as BotSdk
     const files = [{ uri: "data:image/png;base64,aGVsbG8=", mime: "image/png", name: "photo.png" }]
 
-    await deliverMessage({ sdk, sessionID: "session", text: "inspect", files, reply: async () => {}, log: () => {} })
+    await deliverMessage({
+      sdk,
+      sessionID: "session",
+      promptID: "msg_current",
+      text: "inspect",
+      files,
+      reply: async () => {},
+      log: () => {},
+    })
 
     expect(prompt).toEqual({ text: "inspect", files })
   })

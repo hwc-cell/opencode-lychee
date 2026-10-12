@@ -17,6 +17,10 @@ export const CHAT_COMMANDS = [
   "/autostop",
   "/help",
   "/halp",
+  "/busy",
+  "/permissions",
+  "/approve",
+  "/deny",
 ]
 
 export type ChatCommandStatus = {
@@ -48,10 +52,23 @@ export async function handleChatCommand(args: {
     switchModel: (model: BridgeModelRef) => Promise<boolean>
   }
   controls?: ChatCommandControls
+  busyMode?: (next?: "queue" | "interrupt") => Promise<"queue" | "interrupt">
 }): Promise<boolean> {
   const text = args.text.trim()
   const command = text.toLowerCase()
   const isOwner = args.fromUserId === args.ownerUserId
+
+  if (command === "/busy" || command.startsWith("/busy ")) {
+    if (!args.busyMode) return false
+    const next = command.slice("/busy".length).trim()
+    if (next && next !== "queue" && next !== "interrupt") {
+      await args.reply(t("busyUsage"))
+      return true
+    }
+    const mode = await args.busyMode(next === "queue" || next === "interrupt" ? next : undefined)
+    await args.reply(t("busyMode", { mode: t(mode === "queue" ? "busyQueue" : "busyInterrupt") }))
+    return true
+  }
 
   if (command === "/model" || command.startsWith("/model ")) {
     if (!args.models) return false

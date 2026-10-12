@@ -17,7 +17,7 @@ export type BridgeModelInfo = {
 
 export type BridgeModelRef = { id: string; providerID: string; variant?: string }
 export type BridgeFile = { uri: string; mime: string; name?: string }
-type SdkOptions = { throwOnError?: boolean }
+type SdkOptions = { throwOnError?: boolean; signal?: AbortSignal }
 
 export type BotSdk = {
   v2: {
@@ -51,7 +51,7 @@ export type BotSdk = {
       wait(parameters: { sessionID: string }, options?: SdkOptions): Promise<unknown>
       interrupt(parameters: { sessionID: string }, options?: SdkOptions): Promise<unknown>
       messages(
-        parameters: { sessionID: string; limit?: number; order?: "asc" | "desc" },
+        parameters: { sessionID: string; limit?: number; order?: "asc" | "desc"; cursor?: string },
         options?: SdkOptions,
       ): Promise<unknown>
     }
@@ -69,6 +69,8 @@ export type DeliverArgs = {
   notify?: (text: string) => Promise<void>
   stream?: (text: string) => Promise<void>
   log: (msg: string) => void
+  poll?: () => Promise<void>
+  cancelled?: () => boolean
 }
 
 // 每次尝试的最长等待(看门狗), 超时视为模型超时; 可用 LYCHEE_MODEL_TIMEOUT_MS 覆盖
@@ -90,28 +92,46 @@ type RunState = {
   streamed: string
   pending: string
   polling: boolean
+  pollTask?: Promise<void>
+  rewritten: boolean
 }
 
 const runState = new Map<string, RunState>()
 const queues = new Map<string, Promise<void>>()
+const queueVersions = new Map<string, number>()
 
 // 每个 key 串行执行任务; 已在队列中时新任务会排在旧任务之后
-export function enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
+export function enqueue<T>(key: string, task: (cancelled: () => boolean) => Promise<T>): Promise<T | undefined> {
   const prev = queues.get(key) ?? Promise.resolve()
-  const run = prev.catch(() => {}).then(task)
+  const version = queueVersions.get(key) ?? 0
+  const run = prev
+    .catch(() => {})
+    .then(() => {
+      if ((queueVersions.get(key) ?? 0) !== version) return
+      return task(() => (queueVersions.get(key) ?? 0) !== version)
+    })
   const tail = run.then(
     () => undefined,
     () => undefined,
   )
   queues.set(key, tail)
   void tail.then(() => {
-    if (queues.get(key) === tail) queues.delete(key)
+    if (queues.get(key) === tail) {
+      queues.delete(key)
+      queueVersions.delete(key)
+    }
   })
   return run
 }
 
 export function isQueued(key: string): boolean {
   return queues.has(key)
+}
+
+export function cancelQueued(key: string): boolean {
+  if (!isQueued(key)) return false
+  queueVersions.set(key, (queueVersions.get(key) ?? 0) + 1)
+  return true
 }
 
 export function isSessionRunning(sessionID: string): boolean {
@@ -141,8 +161,9 @@ export async function interruptAll(sdk: BotSdk): Promise<void> {
 }
 
 type AssistantMessage = {
+  id?: string
   type?: string
-  error?: { name?: string }
+  error?: { name?: string; type?: string }
   content?: Array<{ type?: string; text?: string; name?: string; state?: { status?: string } }>
 }
 
@@ -153,17 +174,48 @@ function rowsOf(res: unknown): AssistantMessage[] {
   return inner?.data ?? []
 }
 
-async function lastAssistant(v2: V2Session, sessionID: string): Promise<AssistantMessage | undefined> {
-  const res = await v2.messages({ sessionID, limit: 10, order: "desc" }, { throwOnError: true })
-  const rows = rowsOf(res).filter((row) => row.type === "assistant")
-  return rows[0]
+// Only messages after this exact admitted input belong to its reply. Multiple v2
+// model steps are separate assistant messages, not revisions of one text blob.
+export async function readTurnResponse(v2: V2Session, sessionID: string, promptID: string) {
+  const messages: AssistantMessage[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < 20; page++) {
+    const response = await v2.messages(
+      { sessionID, limit: 50, ...(cursor ? { cursor } : { order: "desc" as const }) },
+      { throwOnError: true },
+    )
+    const rows = rowsOf(response)
+    const boundary = rows.findIndex((row) => row.id === promptID)
+    messages.push(...(boundary < 0 ? rows : rows.slice(0, boundary)))
+    if (boundary >= 0) {
+      const ordered = messages.reverse()
+      const nextInput = ordered.findIndex((row) => row.type === "user")
+      const assistants = (nextInput < 0 ? ordered : ordered.slice(0, nextInput)).filter(
+        (row) => row.type === "assistant",
+      )
+      const latest = assistants.at(-1)
+      const tool = latest?.content?.find(
+        (part) => part.type === "tool" && part.state?.status !== "completed" && part.state?.status !== "error",
+      )?.name
+      return {
+        text: assistants.map(assistantText).filter(Boolean).join("\n\n"),
+        error: latest?.error,
+        tool,
+      }
+    }
+    // SAFETY: BotSdk's adapter preserves the generated message-list cursor envelope.
+    const next = (response as { data?: { cursor?: { next?: string } } }).data?.cursor?.next
+    if (!rows.length || !next || next === cursor) return { text: "" }
+    cursor = next
+  }
+  throw new Error(t("replyTooLong"))
 }
 
-async function readLastAssistant(v2: V2Session, sessionID: string, log: (msg: string) => void) {
+async function readReply(v2: V2Session, sessionID: string, promptID: string, log: (msg: string) => void) {
   let failure: unknown
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      return await lastAssistant(v2, sessionID)
+      return await readTurnResponse(v2, sessionID, promptID)
     } catch (error) {
       failure = error
       log(`读取回复失败 (${attempt}/3): ${error instanceof Error ? error.message : error}`)
@@ -199,6 +251,7 @@ async function flushPending(state: RunState, stream: (text: string) => Promise<v
 async function poll(
   v2: V2Session,
   sessionID: string,
+  promptID: string,
   state: RunState,
   stream: (text: string) => Promise<void>,
   log: (msg: string) => void,
@@ -206,27 +259,26 @@ async function poll(
   if (state.polling) return
   state.polling = true
   try {
-    const assistant = await lastAssistant(v2, sessionID)
-    if (!assistant) return
+    const response = await readTurnResponse(v2, sessionID, promptID)
+    if (state.abortedByUser) return
     // 运行状态
-    const runningTool = assistant.content?.find(
-      (part) => part.type === "tool" && part.state?.status !== "completed" && part.state?.status !== "error",
-    )
-    if (runningTool?.name) {
-      state.tool = runningTool.name
-      state.info = t("runningTool", { tool: runningTool.name })
+    if (response.tool) {
+      state.tool = response.tool
+      state.info = t("runningTool", { tool: response.tool })
     } else {
       state.tool = undefined
-      const text = assistantText(assistant)
+      const text = response.text
       if (text) {
         const compact = text.replaceAll(/\s+/g, " ").trim().slice(-60)
         if (compact) state.info = compact
       }
     }
-    // 流式增量: 模型重写(文本变短)时忽略
-    if (assistant.error) return
-    const full = assistantText(assistant)
-    if (full.length < state.streamed.length) return
+    if (response.error || state.rewritten) return
+    const full = response.text
+    if (!full.startsWith(state.streamed)) {
+      state.rewritten = true
+      return
+    }
     const newPart = full.slice(state.streamed.length)
     if (newPart) {
       state.streamed = full
@@ -244,18 +296,22 @@ async function poll(
 async function waitIdle(
   v2: V2Session,
   sessionID: string,
+  promptID: string,
   state: RunState,
   log: (msg: string) => void,
   notify: (text: string) => Promise<void>,
   stream: (text: string) => Promise<void>,
+  pollExtra?: () => Promise<void>,
 ): Promise<"idle" | "timeout"> {
   const startedAt = Date.now()
   let lastReminder = startedAt
-  const timer = setInterval(() => {
-    void (async () => {
-      await poll(v2, sessionID, state, stream, log)
+  const tick = () => {
+    if (state.pollTask) return
+    state.pollTask = (async () => {
+      await poll(v2, sessionID, promptID, state, stream, log)
+      if (!state.abortedByUser) await pollExtra?.()
       const elapsed = Date.now() - startedAt
-      if (elapsed - (lastReminder - startedAt) >= WORK_REMINDER_MS) {
+      if (!state.abortedByUser && elapsed - (lastReminder - startedAt) >= WORK_REMINDER_MS) {
         lastReminder = Date.now()
         const mins = Math.max(1, Math.floor(elapsed / 60_000))
         await notify(
@@ -263,17 +319,26 @@ async function waitIdle(
         )
         log(`工作提醒: 已工作约 ${mins} 分钟${state.tool ? ` (${state.tool})` : ""}`)
       }
-    })().catch(() => {})
-  }, 2000)
-  void poll(v2, sessionID, state, stream, log)
+    })()
+      .catch((error) => log(`状态刷新失败: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => {
+        state.pollTask = undefined
+      })
+  }
+  const timer = setInterval(tick, 2000)
+  tick()
+  const abort = new AbortController()
+  let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     const deadline = startedAt + MODEL_TIMEOUT_MS
-    const timedOut = sleep(MODEL_TIMEOUT_MS).then(() => "timeout" as const)
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timeout = setTimeout(() => resolve("timeout"), MODEL_TIMEOUT_MS)
+    })
     let reconnectAttempt = 0
     while (Date.now() < deadline) {
       try {
         return await Promise.race([
-          v2.wait({ sessionID }, { throwOnError: true }).then(() => "idle" as const),
+          v2.wait({ sessionID }, { throwOnError: true, signal: abort.signal }).then(() => "idle" as const),
           timedOut,
         ])
       } catch (error) {
@@ -286,6 +351,9 @@ async function waitIdle(
     return "timeout"
   } finally {
     clearInterval(timer)
+    clearTimeout(timeout)
+    abort.abort()
+    await state.pollTask
   }
 }
 
@@ -307,6 +375,7 @@ export async function interruptCurrent(args: {
 }
 
 export async function deliverMessage(args: DeliverArgs): Promise<void> {
+  if (args.cancelled?.()) return
   const { sdk, sessionID, text, reply, log } = args
   const notify = args.notify ?? reply
   const stream = args.stream ?? reply
@@ -326,20 +395,23 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     streamed: "",
     pending: "",
     polling: false,
+    rewritten: false,
   }
   runState.set(sessionID, state)
   // 钉死模型: session 级 model 不持久, 每次处理前切一次(失败不阻塞, 只用默认)
   if (args.model) {
     await v2.switchModel({ sessionID, model: args.model }, { throwOnError: true }).catch(() => {})
   }
-  log(`🤖 开始处理 (${sessionID}): ${text.slice(0, 20)}…`)
-  await notify(t("started"))
+  log(`🤖 开始处理 (${sessionID})`)
   try {
+    await notify(t("started"))
+    if (state.abortedByUser || args.cancelled?.()) return
     // admission 可能已在服务端成功、但响应在网络中丢失。所有重试复用同一个 ID，
     // 让 V2 exact-retry 去重，绝不能把可能包含工具调用的整轮对话重新执行。
     const promptID = args.promptID ?? `msg_${randomUUID().replaceAll("-", "")}`
     let admitted: unknown
     for (let attempt = 1; attempt <= PROMPT_ADMISSION_ATTEMPTS; attempt++) {
+      if (state.abortedByUser || args.cancelled?.()) return
       try {
         admitted = await v2.prompt(
           { sessionID, id: promptID, prompt: { text, ...(args.files?.length ? { files: args.files } : {}) } },
@@ -359,7 +431,12 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     }
     log(`已递交 prompt (${(admitted as { data?: { data?: { id?: string } } })?.data?.data?.id ?? "n/a"})`)
 
-    const outcome = await waitIdle(v2, sessionID, state, log, notify, stream)
+    if (state.abortedByUser || args.cancelled?.()) {
+      await safeInterrupt(v2, sessionID)
+      return
+    }
+
+    const outcome = await waitIdle(v2, sessionID, promptID, state, log, notify, stream, args.poll)
     if (state.abortedByUser) {
       log("被用户消息打断, 静默结束(通知已由新任务发出)")
       return
@@ -373,10 +450,16 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
       return
     }
 
-    const assistant = await readLastAssistant(v2, sessionID, log)
-    if (assistant && !assistant.error) {
-      const finalText = assistantText(assistant)
+    const response = await readReply(v2, sessionID, promptID, log)
+    if (state.abortedByUser || args.cancelled?.()) return
+    if (response && !response.error) {
+      const finalText = response.text
       if (finalText) {
+        if (state.rewritten || !finalText.startsWith(state.streamed)) {
+          state.pending = ""
+          await reply(t("replyRevised") + "\n\n" + finalText)
+          return
+        }
         await flushPending(state, stream, log)
         const remaining = finalText.slice(state.streamed.length)
         if (remaining) await reply(remaining)
@@ -387,14 +470,15 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
       return
     }
 
-    const errorName = assistant?.error?.name
-    if (errorName === "MessageAbortedError") {
+    const errorName = response?.error?.type ?? response?.error?.name
+    if (errorName === "MessageAbortedError" || errorName === "session.interrupted") {
       await reply(t("interrupted", { what: state.info || t("thinking") }))
       return
     }
     log(`模型出错 (${errorName ?? "unknown"}), 服务端重试已结束, 不再重复提交用户消息`)
     await reply(t("error"))
   } catch (error) {
+    if (state.abortedByUser || args.cancelled?.()) return
     log(`处理失败: ${error instanceof Error ? error.message : error}`)
     await reply(t("error"))
   } finally {

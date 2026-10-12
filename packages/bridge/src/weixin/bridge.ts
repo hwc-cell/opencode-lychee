@@ -1,4 +1,4 @@
-import { OpenCode } from "@opencode/client"
+import { OpenCode, type OpenCodeClient } from "@opencode/client"
 import { randomUUID } from "node:crypto"
 import { stat } from "node:fs/promises"
 import { homedir } from "node:os"
@@ -11,6 +11,7 @@ import { handleChatCommand } from "../commands"
 import {
   deliverMessage,
   enqueue,
+  cancelQueued,
   interruptAll,
   interruptCurrent,
   isQueued,
@@ -20,6 +21,7 @@ import {
   type BridgeModelRef,
 } from "../bot"
 import { t } from "../i18n"
+import { handlePermissionCommand, notifyPermissions } from "../permissions"
 
 export type BridgeOptions = {
   serverUrl: string
@@ -28,37 +30,45 @@ export type BridgeOptions = {
   log: (msg: string) => string | void
 }
 
-const makeClient = (serverUrl: string, headers?: HeadersInit): BotSdk => {
-  const client = OpenCode.make({ baseUrl: serverUrl, headers })
+export const makeBotSdk = (client: OpenCodeClient): BotSdk => {
   return {
     v2: {
       model: {
         list: async (input) => ({ data: { data: (await client.model.list(input)).data } }),
       },
       session: {
-        create: async (input) => ({
+        create: async (input, options) => ({
           data: {
-            data: await client.session.create({
-              ...input,
-              location: input?.location?.directory ? { directory: input.location.directory } : undefined,
-            }),
+            data: await client.session.create(
+              {
+                ...input,
+                location: input?.location?.directory ? { directory: input.location.directory } : undefined,
+              },
+              { signal: options?.signal },
+            ),
           },
         }),
-        prompt: async (input) => ({
+        prompt: async (input, options) => ({
           data: {
-            data: await client.session.prompt({
-              sessionID: input.sessionID,
-              id: input.id,
-              text: input.prompt?.text ?? "",
-              files: input.prompt?.files,
-              delivery: input.delivery,
-            }),
+            data: await client.session.prompt(
+              {
+                sessionID: input.sessionID,
+                id: input.id,
+                text: input.prompt?.text ?? "",
+                files: input.prompt?.files,
+                delivery: input.delivery,
+              },
+              { signal: options?.signal },
+            ),
           },
         }),
-        switchModel: (input) => client.session.switchModel(input),
-        wait: (input) => client.session.wait(input),
-        interrupt: (input) => client.session.interrupt(input),
-        messages: async (input) => ({ data: { data: (await client.message.list(input)).data } }),
+        switchModel: (input, options) => client.session.switchModel(input, { signal: options?.signal }),
+        wait: (input, options) => client.session.wait(input, { signal: options?.signal }),
+        interrupt: (input, options) => client.session.interrupt(input, { signal: options?.signal }),
+        messages: async (input, options) => {
+          const response = await client.message.list(input, { signal: options?.signal ?? AbortSignal.timeout(5000) })
+          return { data: { data: response.data, cursor: response.cursor } }
+        },
       },
     },
   }
@@ -97,7 +107,8 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const state = readState()
   const cred = state.credential
   if (!cred) throw new Error("未登录: 请先运行 OpenCode-Lychee weixin login")
-  const sdk = makeClient(opts.serverUrl, opts.headers)
+  const client = OpenCode.make({ baseUrl: opts.serverUrl, headers: opts.headers })
+  const sdk = makeBotSdk(client)
   const pending = new Map<string, Promise<Session | undefined>>()
   const checked = new Set<string>()
   const generations = new Map<string, number>()
@@ -114,7 +125,10 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   }
   const forgetAllSessions = () => {
     const keys = new Set([...Object.keys(readState().sessions ?? {}), ...pending.keys()])
-    for (const key of keys) generations.set(key, (generations.get(key) ?? 0) + 1)
+    for (const key of keys) {
+      generations.set(key, (generations.get(key) ?? 0) + 1)
+      cancelQueued(key)
+    }
     pending.clear()
     checked.clear()
     updateState((next) => {
@@ -213,6 +227,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
     inFlight.add(key)
     const task = handleMessage({
       opts,
+      client,
       sdk,
       token: cred.token,
       baseUrl: cred.baseUrl,
@@ -312,7 +327,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
     }
     for (const msg of incoming) {
       const text = messageText(msg)
-      if (text) opts.log(`📩 收到 ${msg.from_user_id}: ${text.slice(0, 40)}`)
+      if (text) opts.log(`📩 收到文字消息 (${text.length} 字)`)
     }
     // 只按持久化 inbox 的插入顺序调度，失败的旧消息不会被刚收到的新消息插队。
     for (const [key, msg] of Object.entries(readState().inbox ?? {})) schedule(key, msg)
@@ -327,6 +342,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
 }
 
 async function handleMessage(args: {
+  client: OpenCodeClient
   opts: BridgeOptions
   sdk: BotSdk
   token: string
@@ -378,6 +394,19 @@ async function handleMessage(args: {
     }
   }
 
+  if (
+    text &&
+    (await handlePermissionCommand({
+      client: args.client,
+      sessionID: state.sessions?.[userKey],
+      text,
+      // A shared group session is not sufficient evidence of who requested a tool.
+      owner: msg.from_user_id === ownerUserId && !msg.group_id,
+      reply,
+    }))
+  )
+    return
+
   // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
   state.models = state.models ?? {}
   const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split(
@@ -397,6 +426,15 @@ async function handleMessage(args: {
       workDir: args.currentDirectory(),
       reply,
       log: (m) => opts.log(m),
+      busyMode: async (next) => {
+        if (next)
+          updateState((current) => {
+            if (current.credential?.token !== token) return
+            current.busyModes = current.busyModes ?? {}
+            current.busyModes[userKey] = next
+          })
+        return readState().busyModes?.[userKey] ?? "queue"
+      },
       models: {
         list: async () => {
           const res = (await sdk.v2.model.list(
@@ -428,19 +466,29 @@ async function handleMessage(args: {
         newSession: async () => {
           if (!state.models?.[userKey] && !state.model) return false
           const stored = args.forgetSession(userKey)
+          cancelQueued(userKey)
           if (stored) await interruptCurrent({ sdk, sessionID: stored, reply, log: (m) => opts.log(m), notify: false })
           return Boolean(await session(userKey, model))
         },
         clearSession: async () => {
           const stored = args.forgetSession(userKey)
+          cancelQueued(userKey)
           if (!stored) return false
           await interruptCurrent({ sdk, sessionID: stored, reply, log: (m) => opts.log(m), notify: false })
           return true
         },
         stop: async () => {
           const current = readState().sessions?.[userKey]
-          if (!current) return false
-          return interruptCurrent({ sdk, sessionID: current, reply, log: (m) => opts.log(m), notify: false })
+          const cancelled = cancelQueued(userKey)
+          if (!current) return cancelled
+          const stopped = await interruptCurrent({
+            sdk,
+            sessionID: current,
+            reply,
+            log: (m) => opts.log(m),
+            notify: false,
+          })
+          return stopped || cancelled
         },
         status: async () => {
           const current = readState()
@@ -466,18 +514,6 @@ async function handleMessage(args: {
     return
   }
 
-  let prompt
-  try {
-    prompt = await messagePrompt(msg)
-  } catch (error) {
-    await reply(t("mediaFailed", { error: error instanceof Error ? error.message : String(error) }))
-    return
-  }
-  if (!prompt.text && !prompt.files.length) {
-    await reply(t("unsupported"))
-    return
-  }
-
   const ready = await session(userKey, model)
   if (!ready) {
     await reply(t("noSession"))
@@ -485,19 +521,42 @@ async function handleMessage(args: {
   }
   const sessionID = ready.id
 
-  // 新消息打断正在运行的旧任务(通知由核心发出)
+  // Follow-ups queue by default; interrupt mode is an explicit per-chat choice.
+  let queuedNotice = Promise.resolve()
   if (isQueued(userKey)) {
-    await interruptCurrent({ sdk, sessionID, reply, log: (m) => opts.log(m) })
+    if ((readState().busyModes?.[userKey] ?? "queue") === "interrupt")
+      await interruptCurrent({ sdk, sessionID, reply, log: (m) => opts.log(m) })
+    else
+      queuedNotice = reply(t("busyQueued")).catch(() => {
+        opts.log("排队通知发送失败，消息仍在队列中")
+      })
   }
 
   // 同一用户串行处理: 新消息在旧任务结束后执行
-  await enqueue(userKey, async () => {
+  await enqueue(userKey, async (cancelled) => {
+    await queuedNotice
     if (readState().sessions?.[userKey] !== sessionID) {
       opts.log(`会话已切换, 跳过旧队列消息 (${sessionID})`)
       return
     }
+    // Download attachments inside the conversation queue so a slower image cannot
+    // be overtaken by a later text message, and /stop can cancel pending work.
+    let prompt
+    try {
+      prompt = await messagePrompt(msg)
+    } catch (error) {
+      if (!cancelled()) await reply(t("mediaFailed", { error: error instanceof Error ? error.message : String(error) }))
+      return
+    }
+    if (cancelled()) return
+    if (!prompt.text && !prompt.files.length) {
+      await reply(t("unsupported"))
+      return
+    }
     if (ready.created) await reply(t("created"))
-    await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
+    if (cancelled()) return
+    const typing = sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
+    const announced = new Set<string>()
     try {
       await deliverMessage({
         sdk,
@@ -506,6 +565,11 @@ async function handleMessage(args: {
         files: prompt.files,
         promptID: promptID(accountId, msg),
         model,
+        cancelled,
+        poll:
+          msg.from_user_id === ownerUserId && !msg.group_id
+            ? () => notifyPermissions({ client: args.client, sessionID, announced, reply })
+            : undefined,
         reply: async (replyText) => {
           const chunks = chunkText(replyText, 1990)
           for (let i = 0; i < chunks.length; i++) {
@@ -516,6 +580,7 @@ async function handleMessage(args: {
         log: (m) => opts.log(m),
       })
     } finally {
+      await typing
       await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 2 })
     }
   })
