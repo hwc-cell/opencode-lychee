@@ -1,79 +1,42 @@
-import { RGBA, TextAttributes } from "@opentui/core"
-import { For, type JSX } from "solid-js"
+import { RGBA } from "@opentui/core"
+import { For, Show } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useTheme } from "../context/theme"
-import { tint } from "../theme/color"
-import { go, logo } from "../logo"
+import { lycheeIcon } from "../logo"
+
+const palette = new Map(Object.entries(lycheeIcon.palette).map(([key, rgb]) => [key, RGBA.fromInts(...rgb)]))
 
 export function Logo() {
   const theme = useTheme()
   const dimensions = useTerminalDimensions()
 
-  const renderLine = (line: string, fg: RGBA, bold: boolean): JSX.Element[] => {
-    const shadow = tint(theme.background.base, fg, 0.25)
-    const attrs = bold ? TextAttributes.BOLD : undefined
-    return Array.from(line).map((char) => {
-      if (char === "_") {
-        return (
-          <text fg={fg} bg={shadow} attributes={attrs} selectable={false}>
-            {" "}
-          </text>
-        )
-      }
-      if (char === "^") {
-        return (
-          <text fg={fg} bg={shadow} attributes={attrs} selectable={false}>
-            ▀
-          </text>
-        )
-      }
-      if (char === "~") {
-        return (
-          <text fg={shadow} attributes={attrs} selectable={false}>
-            ▀
-          </text>
-        )
-      }
-      if (char === ",") {
-        return (
-          <text fg={shadow} attributes={attrs} selectable={false}>
-            ▄
-          </text>
-        )
-      }
-      return (
-        <text fg={fg} attributes={attrs} selectable={false}>
-          {char}
-        </text>
-      )
-    })
-  }
+  const full = () => dimensions().width >= 36 && dimensions().height >= 24
 
   return (
-    <box>
-      {dimensions().height < 12 ? null : dimensions().width < 22 ? (
-        <For each={go.right.slice(1)}>
-          {(line) => <box flexDirection="row">{renderLine(line, theme.text.base, true)}</box>}
-        </For>
-      ) : dimensions().width < 44 ? (
-        <>
-          <For each={logo.left.slice(1)}>
-            {(line) => <box flexDirection="row">{renderLine(line, theme.text.muted, false)}</box>}
+    <Show when={dimensions().height >= 12}>
+      <box alignItems="center" flexShrink={0}>
+        <Show when={full()}>
+          <For each={lycheeIcon.top}>
+            {(row, index) => (
+              <text height={1} selectable={false}>
+                <For each={Array.from(row)}>
+                  {(pixel, column) => {
+                    const top = palette.get(pixel)
+                    const bottom = palette.get(lycheeIcon.bottom[index()][column()])
+                    if (!top && !bottom) return <span> </span>
+                    return (
+                      <span style={{ fg: top ?? theme.background.base, bg: bottom ?? theme.background.base }}>▀</span>
+                    )
+                  }}
+                </For>
+              </text>
+            )}
           </For>
-          <For each={logo.right}>
-            {(line) => <box flexDirection="row">{renderLine(line, theme.text.base, true)}</box>}
-          </For>
-        </>
-      ) : (
-        <For each={logo.left}>
-          {(line, index) => (
-            <box flexDirection="row" gap={1}>
-              <box flexDirection="row">{renderLine(line, theme.text.muted, false)}</box>
-              <box flexDirection="row">{renderLine(logo.right[index()], theme.text.base, true)}</box>
-            </box>
-          )}
-        </For>
-      )}
-    </box>
+        </Show>
+        <text fg={theme.text.base} selectable={false}>
+          lychee
+        </text>
+      </box>
+    </Show>
   )
 }
