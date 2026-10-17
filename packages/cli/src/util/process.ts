@@ -1,4 +1,5 @@
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 const entrypoint = process.argv[1] ? path.resolve(process.argv[1]) : undefined
 
@@ -7,7 +8,9 @@ export function selfCommand() {
   if (runtime !== "bun" && runtime !== "node" && runtime !== "nodejs") return [process.execPath]
   if (!entrypoint) throw new Error("Failed to resolve CLI entrypoint")
   if (runtime === "node" || runtime === "nodejs") return [process.execPath, ...nodeFlags(), entrypoint]
-  return [process.execPath, entrypoint]
+  // The server starts from the user's project (and later the service home), so
+  // it cannot rely on packages/cli/bunfig.toml to register the Solid JSX loader.
+  return [process.execPath, "--preload", fileURLToPath(import.meta.resolve("@opentui/solid/preload")), entrypoint]
 }
 
 function nodeFlags() {
