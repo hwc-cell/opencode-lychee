@@ -7,19 +7,36 @@ import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { isolatedEnv } from "./fixture/environment"
 import { createOpenUseServer } from "../src/open-use/server"
 
-test("Open Use teaches its visual-only contract and rejects invalid control requests before opening UI", async () => {
+test("Open Use teaches exact-window input boundaries and rejects unapproved or invalid requests before opening UI", async () => {
   const use = createOpenUseServer()
   const client = new Client({ name: "open-use-test", version: "1.0.0" })
   const [local, remote] = InMemoryTransport.createLinkedPair()
   try {
     await Promise.all([use.server.connect(remote), client.connect(local)])
-    expect(client.getInstructions()).toContain("ONLY displays an independent visual pointer")
+    expect(client.getInstructions()).toContain("Real click/type_text actions are OFF")
     const tools = await client.listTools()
-    expect(tools.tools.map((tool) => tool.name).sort()).toEqual(["cursor", "displays", "guide", "hide", "state"])
+    expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+      "click",
+      "cursor",
+      "displays",
+      "guide",
+      "hide",
+      "observe_window",
+      "permissions",
+      "release_window",
+      "select_window",
+      "state",
+      "type_text",
+      "window_cursor",
+      "windows",
+    ])
     const guide = await client.callTool({ name: "guide", arguments: {} })
     const guideText = JSON.stringify(guide)
     expect(guideText).toContain("origin TOP LEFT")
     expect(guideText).toContain("Never describe a cursor move as a real click")
+    expect(guideText).toContain("SAME windowID")
+    expect(guideText).toContain("never fall back to another window")
+    expect(guideText).toContain("Each real action also needs a local native human confirmation")
     for (const args of [
       { displayID: "1", x: -1, y: 0 },
       { displayID: "1", x: 0, y: 0, seconds: 31 },
@@ -28,6 +45,36 @@ test("Open Use teaches its visual-only contract and rejects invalid control requ
     ]) {
       expect(await client.callTool({ name: "cursor", arguments: args })).toMatchObject({ isError: true })
     }
+    for (const args of [{ windowID: 0 }, { windowID: 1.5 }, { windowID: 4294967296 }]) {
+      expect(await client.callTool({ name: "select_window", arguments: args })).toMatchObject({ isError: true })
+    }
+    expect(await client.callTool({ name: "window_cursor", arguments: { windowID: 1, x: -1, y: 0 } })).toMatchObject({
+      isError: true,
+    })
+    for (const name of ["click", "type_text"]) {
+      const denied = await client.callTool({
+        name,
+        arguments: {
+          windowID: 1,
+          observationID: "not-an-observation",
+          elementID: 0,
+          ...(name === "type_text" ? { text: "test" } : {}),
+        },
+      })
+      expect(denied.isError).toBe(true)
+      expect(JSON.stringify(denied)).toContain("Real input is disabled")
+    }
+    expect(
+      await client.callTool({
+        name: "click",
+        arguments: {
+          windowID: 1,
+          observationID: "test",
+          elementID: 0,
+          allowInput: true,
+        },
+      }),
+    ).toMatchObject({ isError: true })
   } finally {
     await client.close()
     await use.server.close()

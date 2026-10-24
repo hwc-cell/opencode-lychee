@@ -363,9 +363,15 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       ],
     }),
     Spec.make("open-use", {
-      description: "Open Use: macOS model cursor (visual indicator only)",
+      description: "Open Use: macOS window-bound accessibility tools and circular model cursor",
       params: {
-        action: Argument.Literals("action", ["demo", "preview", "mcp", "config", "guide"]),
+        action: Argument.Literals("action", ["demo", "preview", "mcp", "config", "guide", "doctor"]),
+        allowInput: Flag.Boolean("allow-input").pipe(
+          Flag.withDescription(
+            "Opt in to window-bound accessibility input; every action still requires local human confirmation",
+          ),
+          Flag.withDefault(false),
+        ),
         output: Flag.String("output").pipe(Flag.withDescription("PNG output path for preview"), Flag.optional),
       },
     }),

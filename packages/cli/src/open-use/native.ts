@@ -5,18 +5,60 @@ import path from "node:path"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 
+const window = Schema.Struct({
+  id: Schema.Int,
+  pid: Schema.Int,
+  app: Schema.String,
+  bundleID: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  bounds: Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number }),
+})
 const state = Schema.Struct({
   visible: Schema.Boolean,
   realInput: Schema.Literal(false),
   displayID: Schema.optional(Schema.String),
   x: Schema.optional(Schema.Number),
   y: Schema.optional(Schema.Number),
+  coordinateSpace: Schema.Literals(["display", "window"]),
+  window: Schema.optional(window),
 })
 const reply = Schema.Struct({
   id: Schema.Number,
   ok: Schema.Boolean,
   error: Schema.optional(Schema.String),
   state: Schema.optional(state),
+  windows: Schema.optional(Schema.Array(window)),
+  permissions: Schema.optional(
+    Schema.Struct({
+      inputEnabled: Schema.Boolean,
+      accessibility: Schema.Boolean,
+      executable: Schema.String,
+    }),
+  ),
+  observation: Schema.optional(
+    Schema.Struct({
+      id: Schema.String,
+      windowID: Schema.Int,
+      truncated: Schema.Boolean,
+      elements: Schema.Array(
+        Schema.Struct({
+          id: Schema.Int,
+          parent: Schema.optional(Schema.Int),
+          role: Schema.String,
+          label: Schema.String,
+          text: Schema.optional(Schema.String),
+          actions: Schema.Array(Schema.String),
+          editable: Schema.Boolean,
+          bounds: Schema.optional(
+            Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number }),
+          ),
+        }),
+      ),
+    }),
+  ),
+  realInput: Schema.optional(Schema.Boolean),
+  action: Schema.optional(Schema.String),
+  verified: Schema.optional(Schema.Boolean),
   displays: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -66,10 +108,16 @@ export async function cursorBinary() {
 }
 
 export type CursorInput =
-  | { action: "displays" | "state" | "hide" }
+  | { action: "displays" | "state" | "hide" | "windows" | "release_window" }
+  | { action: "select_window"; windowID: number }
+  | { action: "permissions" }
+  | { action: "observe_window"; windowID: number }
+  | { action: "click" | "type_text"; windowID: number; observationID: string; elementID: number; text?: string }
+  | { action: "move_window"; windowID: number; x: number; y: number; seconds: number }
   | { action: "move"; displayID: string; x: number; y: number; seconds: number }
 
 export class NativeCursor {
+  constructor(private readonly allowInput = false) {}
   private child?: ReturnType<typeof spawn>
   private starting?: Promise<void>
   private sequence = 0
@@ -79,7 +127,7 @@ export class NativeCursor {
   private async start() {
     const binary = await cursorBinary()
     if (this.closed) throw new Error("Open Use 已停止。")
-    const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] })
+    const child = spawn(binary, this.allowInput ? ["--allow-input"] : [], { stdio: ["pipe", "pipe", "inherit"] })
     this.child = child
     if (!child.stdout) throw new Error("Open Use 无法读取光标状态。")
     const lines = createInterface({ input: child.stdout })
@@ -107,7 +155,11 @@ export class NativeCursor {
     await this.starting
     const id = ++this.sequence
     return new Promise<typeof reply.Type>((resolve, reject) => {
-      const timer = setTimeout(() => this.close(), 15_000)
+      // Native input and first window observation wait for a human's local confirmation, not a model-generated approval.
+      const timer = setTimeout(
+        () => this.close(),
+        ["click", "type_text", "observe_window"].includes(input.action) ? 120_000 : 15_000,
+      )
       this.pending.set(id, {
         resolve: (value) => {
           clearTimeout(timer)

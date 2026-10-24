@@ -18,8 +18,8 @@ export default Runtime.handler(Commands.commands["open-use"], (input) =>
               servers: {
                 open_use: {
                   type: "local",
-                  command: [...selfCommand(), "open-use", "mcp"],
-                  timeout: { execution: 150_000 },
+                  command: [...selfCommand(), "open-use", "mcp", ...(input.allowInput ? ["--allow-input"] : [])],
+                  timeout: { execution: 300_000 },
                 },
               },
             },
@@ -34,7 +34,16 @@ export default Runtime.handler(Commands.commands["open-use"], (input) =>
       process.stdout.write(instructions + "\n")
       return
     }
-    if (input.action === "mcp") return serveOpenUse(signal)
+    if (input.action === "mcp") return serveOpenUse(signal, input.allowInput)
+    if (input.action === "doctor") {
+      const cursor = new NativeCursor(input.allowInput)
+      try {
+        process.stdout.write(JSON.stringify(await cursor.request({ action: "permissions" }), null, 2) + "\n")
+      } finally {
+        cursor.close()
+      }
+      return
+    }
     const binary = await cursorBinary()
     if (input.action === "preview") {
       const output = path.resolve(

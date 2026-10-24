@@ -1,4 +1,6 @@
 import AppKit
+import CoreGraphics
+import ApplicationServices
 
 struct CursorCommand: Decodable {
     let id: Int
@@ -7,6 +9,10 @@ struct CursorCommand: Decodable {
     let x: Double?
     let y: Double?
     let seconds: Double?
+    let windowID: UInt32?
+    let observationID: String?
+    let elementID: Int?
+    let text: String?
 }
 
 struct DisplayInfo: Encodable {
@@ -23,6 +29,24 @@ struct CursorState: Encodable {
     let x: Double?
     let y: Double?
     let realInput: Bool = false
+    var window: WindowInfo?
+    var coordinateSpace: String = "display"
+}
+
+struct WindowBounds: Encodable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+struct WindowInfo: Encodable {
+    let id: UInt32
+    let pid: Int32
+    let app: String
+    let bundleID: String?
+    let title: String?
+    let bounds: WindowBounds
 }
 
 struct CursorReply: Encodable {
@@ -31,6 +55,41 @@ struct CursorReply: Encodable {
     var error: String?
     var state: CursorState?
     var displays: [DisplayInfo]?
+    var windows: [WindowInfo]?
+    var observation: WindowObservation?
+    var permissions: InputPermissions?
+    var realInput: Bool?
+    var action: String?
+    var verified: Bool?
+}
+
+struct InputPermissions: Encodable {
+    let inputEnabled: Bool
+    let accessibility: Bool
+    let executable: String
+}
+
+struct ObservedControl: Encodable {
+    let id: Int
+    let parent: Int?
+    let role: String
+    let label: String
+    let text: String?
+    let actions: [String]
+    let editable: Bool
+    let bounds: WindowBounds?
+}
+
+struct WindowObservation: Encodable {
+    let id: String
+    let windowID: UInt32
+    let elements: [ObservedControl]
+    let truncated: Bool
+}
+
+struct OpenUseError: LocalizedError {
+    let errorDescription: String?
+    init(_ message: String) { errorDescription = message }
 }
 
 @MainActor
@@ -44,21 +103,18 @@ final class CursorView: NSView {
         shadow.shadowOffset = NSSize(width: 0, height: -2)
         NSGraphicsContext.saveGraphicsState()
         shadow.set()
-        let arrow = NSBezierPath()
-        arrow.move(to: NSPoint(x: 12, y: 10))
-        arrow.line(to: NSPoint(x: 12, y: 39))
-        arrow.line(to: NSPoint(x: 19, y: 32))
-        arrow.line(to: NSPoint(x: 25, y: 45))
-        arrow.line(to: NSPoint(x: 31, y: 42))
-        arrow.line(to: NSPoint(x: 25, y: 29))
-        arrow.line(to: NSPoint(x: 36, y: 29))
-        arrow.close()
+        let ring = NSBezierPath(ovalIn: NSRect(x: 10, y: 10, width: 24, height: 24))
         NSColor.white.setStroke()
-        arrow.lineWidth = 4
-        arrow.lineJoinStyle = .round
-        arrow.stroke()
-        NSColor(srgbRed: 232 / 255, green: 76 / 255, blue: 70 / 255, alpha: 1).setFill()
-        arrow.fill()
+        ring.lineWidth = 5
+        ring.stroke()
+        let red = NSColor(srgbRed: 232 / 255, green: 76 / 255, blue: 70 / 255, alpha: 1)
+        red.withAlphaComponent(0.15).setFill()
+        ring.fill()
+        red.setStroke()
+        ring.lineWidth = 2
+        ring.stroke()
+        red.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 19, y: 19, width: 6, height: 6)).fill()
         let badge = NSBezierPath(roundedRect: NSRect(x: 40, y: 30, width: 98, height: 25), xRadius: 12, yRadius: 12)
         NSColor(srgbRed: 32 / 255, green: 52 / 255, blue: 63 / 255, alpha: 0.96).setFill()
         badge.fill()
@@ -78,9 +134,18 @@ final class CursorController {
     private let panel: NSPanel
     private var buffer = Data()
     private var expiration: Task<Void, Never>?
+    private var tracking: Task<Void, Never>?
+    private var selected: WindowInfo?
+    private let allowInput: Bool
+    private var observationID: String?
+    private var observedWindow: AXUIElement?
+    private var controls: [Int: AXUIElement] = [:]
+    private var confirming = false
+    private var readApproved: UInt32?
     private var state = CursorState(visible: false, displayID: nil, x: nil, y: nil)
 
-    init() {
+    init(allowInput: Bool) {
+        self.allowInput = allowInput
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 154, height: 68),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false
@@ -111,12 +176,71 @@ final class CursorController {
     private func hide() {
         expiration?.cancel()
         expiration = nil
+        tracking?.cancel()
+        tracking = nil
         panel.orderOut(nil)
         state = CursorState(visible: false, displayID: state.displayID, x: state.x, y: state.y)
     }
 
     private func currentState() -> CursorState {
-        CursorState(visible: panel.isVisible, displayID: state.displayID, x: state.x, y: state.y)
+        if let bound = selected {
+            if let fresh = windows(bound.id).first, fresh.pid == bound.pid { selected = fresh }
+            else { releaseWindow() }
+        }
+        var result = CursorState(visible: panel.isVisible, displayID: state.displayID, x: state.x, y: state.y, window: selected)
+        result.coordinateSpace = selected == nil ? "display" : "window"
+        return result
+    }
+
+    private func releaseWindow() {
+        hide()
+        selected = nil
+        state = CursorState(visible: false, displayID: nil, x: nil, y: nil)
+        invalidateObservation()
+        readApproved = nil
+    }
+
+    private func windows(_ id: UInt32? = nil) -> [WindowInfo] {
+        let options: CGWindowListOption = id == nil ? [.optionOnScreenOnly, .excludeDesktopElements] : .optionIncludingWindow
+        guard let rows = CGWindowListCopyWindowInfo(options, id ?? kCGNullWindowID) as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            guard let number = row[kCGWindowNumber as String] as? UInt32,
+                  let pid = row[kCGWindowOwnerPID as String] as? Int32,
+                  pid != ProcessInfo.processInfo.processIdentifier,
+                  (row[kCGWindowLayer as String] as? Int) == 0,
+                  (row[kCGWindowIsOnscreen as String] as? Bool) == true,
+                  let frame = row[kCGWindowBounds as String] as? [String: Double],
+                  let x = frame["X"], let y = frame["Y"], let width = frame["Width"], let height = frame["Height"],
+                  width > 0, height > 0 else { return nil }
+            let app = NSRunningApplication(processIdentifier: pid)
+            return WindowInfo(id: number, pid: pid, app: app?.localizedName ?? (row[kCGWindowOwnerName as String] as? String ?? ""),
+                              bundleID: app?.bundleIdentifier, title: row[kCGWindowName as String] as? String,
+                              bounds: WindowBounds(x: x, y: y, width: width, height: height))
+        }
+    }
+
+    private func placeWindowPointer(x: Double, y: Double) -> Bool {
+        guard let bound = selected, let fresh = windows(bound.id).first, fresh.pid == bound.pid,
+              x.isFinite, y.isFinite, x >= 0, y >= 0, x < fresh.bounds.width, y < fresh.bounds.height,
+              let primary = NSScreen.screens.first else { return false }
+        // CGWindow bounds use Quartz global top-left points; AppKit uses bottom-left points.
+        let point = NSPoint(x: fresh.bounds.x + x, y: primary.frame.maxY - fresh.bounds.y - y)
+        guard let screen = NSScreen.screens.first(where: {
+            point.x >= $0.frame.minX && point.x < $0.frame.maxX && point.y > $0.frame.minY && point.y <= $0.frame.maxY
+        }) else { return false }
+        selected = fresh
+        panel.setFrameOrigin(NSPoint(x: point.x - 22, y: point.y - (panel.frame.height - 22)))
+        panel.orderFrontRegardless()
+        state = CursorState(visible: true, displayID: screenID(screen), x: x, y: y)
+        return true
+    }
+
+    private func expire(after seconds: Double) {
+        expiration?.cancel()
+        expiration = Task {
+            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            hide()
+        }
     }
 
     private func execute(_ command: CursorCommand) -> CursorReply {
@@ -128,7 +252,47 @@ final class CursorController {
         case "hide":
             hide()
             return CursorReply(id: command.id, ok: true, state: currentState())
+        case "windows":
+            return CursorReply(id: command.id, ok: true, state: currentState(), windows: windows())
+        case "select_window":
+            guard let id = command.windowID, let window = windows(id).first else {
+                return CursorReply(id: command.id, ok: false, error: "Window is unavailable. List windows again; never fall back to another window.")
+            }
+            hide()
+            selected = window
+            invalidateObservation()
+            readApproved = nil
+            state = CursorState(visible: false, displayID: nil, x: nil, y: nil)
+            return CursorReply(id: command.id, ok: true, state: currentState())
+        case "release_window":
+            releaseWindow()
+            return CursorReply(id: command.id, ok: true, state: currentState())
+        case "permissions", "observe_window", "click", "type_text":
+            do { return try windowAction(command) }
+            catch { return CursorReply(id: command.id, ok: false, error: error.localizedDescription) }
+        case "move_window":
+            guard let id = command.windowID, id == selected?.id,
+                  let x = command.x, let y = command.y,
+                  let seconds = command.seconds, seconds.isFinite, (1...30).contains(seconds) else {
+                return CursorReply(id: command.id, ok: false, error: "Select this exact window first. Use window-local points and seconds in 1...30.")
+            }
+            guard placeWindowPointer(x: x, y: y) else {
+                hide()
+                return CursorReply(id: command.id, ok: false, error: "Window is unavailable or coordinates are outside the visible window. Refresh windows; do not retry elsewhere.")
+            }
+            tracking?.cancel()
+            tracking = Task {
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+                    if !placeWindowPointer(x: x, y: y) { releaseWindow(); return }
+                }
+            }
+            expire(after: seconds)
+            return CursorReply(id: command.id, ok: true, state: currentState())
         case "move":
+            guard selected == nil else {
+                return CursorReply(id: command.id, ok: false, error: "A window is bound. Use move_window or explicitly release_window first.")
+            }
             guard let screen = NSScreen.screens.first(where: { screenID($0) == command.displayID }),
                   let x = command.x, let y = command.y, x.isFinite, y.isFinite,
                   x >= 0, y >= 0, x < screen.frame.width, y < screen.frame.height,
@@ -138,14 +302,11 @@ final class CursorController {
             }
             expiration?.cancel()
             // Tool coordinates start at the selected display's top-left, in points, not Retina pixels.
-            panel.setFrameOrigin(NSPoint(x: screen.frame.minX + x - 12,
-                                         y: screen.frame.maxY - y - (panel.frame.height - 10)))
+            panel.setFrameOrigin(NSPoint(x: screen.frame.minX + x - 22,
+                                         y: screen.frame.maxY - y - (panel.frame.height - 22)))
             panel.orderFrontRegardless()
             state = CursorState(visible: true, displayID: screenID(screen), x: x, y: y)
-            expiration = Task {
-                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
-                hide()
-            }
+            expire(after: seconds)
             return CursorReply(id: command.id, ok: true, state: currentState())
         default:
             return CursorReply(id: command.id, ok: false, error: "Unsupported cursor action. No real input is available.")
@@ -175,6 +336,208 @@ final class CursorController {
 }
 
 @MainActor
+private extension CursorController {
+    func invalidateObservation() {
+        observationID = nil
+        observedWindow = nil
+        controls.removeAll()
+    }
+
+    func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value
+    }
+
+    func axElement(_ value: CFTypeRef?) -> AXUIElement? {
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        // SAFETY: AX's runtime type ID has been checked before bridging the opaque CF reference.
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
+    func position(_ element: AXUIElement) -> CGPoint? {
+        guard let raw = attribute(element, kAXPositionAttribute), CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        // SAFETY: AXValueGetTypeID checked above; AXValueGetValue also verifies the requested payload type.
+        let value = unsafeDowncast(raw, to: AXValue.self)
+        var point = CGPoint.zero
+        return AXValueGetValue(value, .cgPoint, &point) ? point : nil
+    }
+
+    func size(_ element: AXUIElement) -> CGSize? {
+        guard let raw = attribute(element, kAXSizeAttribute), CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+        // SAFETY: AXValueGetTypeID checked above; AXValueGetValue verifies CGSize payloads.
+        let value = unsafeDowncast(raw, to: AXValue.self)
+        var size = CGSize.zero
+        return AXValueGetValue(value, .cgSize, &size) ? size : nil
+    }
+
+    func settable(_ element: AXUIElement, _ name: String) -> Bool {
+        var allowed = DarwinBoolean(false)
+        return AXUIElementIsAttributeSettable(element, name as CFString, &allowed) == .success && allowed.boolValue
+    }
+
+    func label(_ element: AXUIElement) -> String {
+        let subrole = attribute(element, kAXSubroleAttribute) as? String
+        if subrole == kAXSecureTextFieldSubrole { return "Secure input (value omitted)" }
+        return String(((attribute(element, kAXTitleAttribute) as? String)
+                       ?? (attribute(element, kAXDescriptionAttribute) as? String) ?? "").prefix(160))
+    }
+
+    func exactWindow(_ id: UInt32?) throws -> (WindowInfo, AXUIElement) {
+        guard AXIsProcessTrusted() else {
+            throw OpenUseError("需要 macOS 辅助功能授权。请由用户手动授权 open-use doctor 显示的原生程序，然后重新连接；模型不得替用户修改系统权限。")
+        }
+        guard let bound = selected, id == bound.id,
+              let fresh = windows(bound.id).first, fresh.pid == bound.pid else {
+            releaseWindow()
+            throw OpenUseError("绑定窗口已失效。重新列出并明确选择窗口；不会回退到其他窗口。")
+        }
+        let app = AXUIElementCreateApplication(fresh.pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        guard let candidates = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else {
+            throw OpenUseError("目标应用没有提供可访问性窗口，不能安全操作。")
+        }
+        let matches = candidates.filter { candidate in
+            guard let point = position(candidate), let dimensions = size(candidate) else { return false }
+            return abs(point.x - fresh.bounds.x) < 1 && abs(point.y - fresh.bounds.y) < 1
+                && abs(dimensions.width - fresh.bounds.width) < 1 && abs(dimensions.height - fresh.bounds.height) < 1
+        }
+        guard matches.count == 1, let window = matches.first else {
+            throw OpenUseError("无法唯一匹配此窗口的可访问性对象，已停止；不会选择第一个候选窗口。")
+        }
+        selected = fresh
+        return (fresh, window)
+    }
+
+    func belongs(_ element: AXUIElement, to window: AXUIElement) -> Bool {
+        var current: AXUIElement? = element
+        for _ in 0..<32 {
+            guard let element = current else { return false }
+            if CFEqual(element, window) { return true }
+            current = axElement(attribute(element, kAXParentAttribute))
+        }
+        return false
+    }
+
+    func observe(_ id: UInt32?) throws -> WindowObservation {
+        let (bound, window) = try exactWindow(id)
+        if readApproved != bound.id {
+            try confirm("读取此窗口的控件结构和静态文字，并返回模型会话。输入框内容不读取，安全字段不展开。", window: bound)
+            let (_, fresh) = try exactWindow(id)
+            guard CFEqual(fresh, window) else { throw OpenUseError("确认期间目标窗口发生变化，请重新选择。") }
+            readApproved = bound.id
+        }
+        invalidateObservation()
+        let token = UUID().uuidString
+        var rows: [ObservedControl] = []
+        func visit(_ element: AXUIElement, parent: Int?, depth: Int) {
+            guard depth <= 12, rows.count < 160 else { return }
+            let index = rows.count
+            let role = attribute(element, kAXRoleAttribute) as? String ?? "unknown"
+            let secure = (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole
+            var names: CFArray?
+            AXUIElementCopyActionNames(element, &names)
+            let bounds: WindowBounds?
+            if let point = position(element), let dimensions = size(element) {
+                bounds = WindowBounds(x: point.x - bound.bounds.x, y: point.y - bound.bounds.y,
+                                      width: dimensions.width, height: dimensions.height)
+            } else { bounds = nil }
+            controls[index] = element
+            rows.append(ObservedControl(id: index, parent: parent, role: role, label: label(element),
+                                        text: role == kAXStaticTextRole && !secure
+                                            ? (attribute(element, kAXValueAttribute) as? String).map { String($0.prefix(160)) } : nil,
+                                        actions: names as? [String] ?? [],
+                                        editable: !secure && settable(element, kAXSelectedTextAttribute), bounds: bounds))
+            if !secure, let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
+                for child in children { visit(child, parent: index, depth: depth + 1) }
+            }
+        }
+        visit(window, parent: nil, depth: 0)
+        observationID = token
+        observedWindow = window
+        return WindowObservation(id: token, windowID: bound.id, elements: rows, truncated: rows.count >= 160)
+    }
+
+    func confirm(_ summary: String, window: WindowInfo, text: String? = nil) throws {
+        guard !confirming else { throw OpenUseError("已有本地确认正在等待，请勿并发提交真实操作。") }
+        confirming = true
+        defer { confirming = false }
+        let alert = NSAlert()
+        alert.messageText = "允许 Open Use 执行这一次操作吗？"
+        alert.informativeText = "应用：\(window.app)\n窗口：\(window.title ?? "标题不可用")（ID \(window.id)）\n\(summary)\n\n仅对当前绑定窗口执行一次；模型不能批准此对话框。"
+        if let text {
+            let preview = NSTextView(frame: NSRect(x: 0, y: 0, width: 420, height: 120))
+            preview.isEditable = false
+            preview.isRichText = false
+            preview.font = .systemFont(ofSize: 13)
+            preview.string = text
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 420, height: 120))
+            scroll.hasVerticalScroller = true
+            scroll.documentView = preview
+            alert.accessoryView = scroll
+        }
+        alert.addButton(withTitle: "允许一次")
+        alert.addButton(withTitle: "拒绝")
+        guard alert.runModal() == .alertFirstButtonReturn else { throw OpenUseError("用户拒绝操作，未发送输入。不得自动重试。") }
+    }
+
+    func windowAction(_ command: CursorCommand) throws -> CursorReply {
+        if command.action == "permissions" {
+            return CursorReply(id: command.id, ok: true, permissions: InputPermissions(
+                inputEnabled: allowInput, accessibility: AXIsProcessTrusted(), executable: CommandLine.arguments[0]))
+        }
+        if command.action == "observe_window" {
+            return CursorReply(id: command.id, ok: true, observation: try observe(command.windowID))
+        }
+        guard allowInput else { throw OpenUseError("真实输入默认关闭。必须由用户在本地使用 --allow-input 启动 MCP；模型不能通过工具参数开启。") }
+        let (bound, window) = try exactWindow(command.windowID)
+        guard let token = command.observationID, token == observationID,
+              let previous = observedWindow, CFEqual(previous, window),
+              let index = command.elementID, let element = controls[index], belongs(element, to: window) else {
+            throw OpenUseError("控件观察已过期或不属于此窗口。请重新 observe_window，不能复用旧编号。")
+        }
+        if (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole {
+            throw OpenUseError("安全输入框必须由用户手动填写。")
+        }
+        let originalLabel = label(element)
+        if command.action == "click" {
+            var actions: CFArray?
+            AXUIElementCopyActionNames(element, &actions)
+            guard (actions as? [String])?.contains(kAXPressAction) == true else {
+                throw OpenUseError("此控件不支持可访问性点击；不使用全局鼠标点击兜底。")
+            }
+        } else {
+            guard let text = command.text, !text.isEmpty, text.utf16.count <= 4000,
+                  settable(element, kAXSelectedTextAttribute) else {
+                throw OpenUseError("此控件不支持安全的选区插入，或文本为空/过长；不覆盖整个字段，也不回退到全局键盘输入。")
+            }
+        }
+        try confirm(command.action == "click" ? "点击控件：\(originalLabel)" : "向控件 \(index)（\(originalLabel)）的当前选区插入下方文字（不发送回车键）。", window: bound,
+                    text: command.action == "type_text" ? command.text : nil)
+        let (_, current) = try exactWindow(command.windowID)
+        guard observationID == token, CFEqual(current, window), belongs(element, to: current), label(element) == originalLabel else {
+            throw OpenUseError("确认期间窗口或控件发生变化，未执行操作，请重新观察。")
+        }
+        guard (attribute(element, kAXSubroleAttribute) as? String) != kAXSecureTextFieldSubrole else {
+            throw OpenUseError("确认期间控件变成了安全输入框，必须交给用户手动填写。")
+        }
+        // Consume the observation before the side effect: even a partial/unknown failure must not be replayed blindly.
+        invalidateObservation()
+        if command.action == "click" {
+            guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else {
+                throw OpenUseError("点击返回失败，执行结果不确定。重新观察，禁止自动重试。")
+            }
+            return CursorReply(id: command.id, ok: true, realInput: true, action: "accessibility_press", verified: false)
+        }
+        guard let text = command.text,
+              AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
+            throw OpenUseError("文本插入返回失败，结果不确定。重新观察，禁止自动重试。")
+        }
+        return CursorReply(id: command.id, ok: true, realInput: true, action: "insert_selected_text", verified: false)
+    }
+}
+
+@MainActor
 func main() {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
@@ -187,7 +550,7 @@ func main() {
         catch { FileHandle.standardError.write(Data("Open Use: cannot write preview\n".utf8)); exit(1) }
         return
     }
-    let controller = CursorController()
+    let controller = CursorController(allowInput: CommandLine.arguments.contains("--allow-input"))
     // File descriptor callbacks bridge into the single AppKit actor; no UI state leaves it.
     FileHandle.standardInput.readabilityHandler = { handle in
         let data = handle.availableData
