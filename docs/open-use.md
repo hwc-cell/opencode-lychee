@@ -22,6 +22,20 @@ OpenCode-Lychee open-use preview --output /tmp/open-use-cursor.png
 
 ## 让模型调用
 
+### 推荐：输入框下方开关
+
+macOS 源码启动的 TUI 会在语音入口旁显示 `◉ Open Use 关`。点击即可开启；也可以输入 `/open-use` 或从命令面板选择「开启 Open Use」。首次开启会先说明用途与权限，确认后自动打开 macOS 的辅助功能设置。
+
+当前仅需**辅助功能**，不需要屏幕录制、输入监控或麦克风权限。请由你手动授权 OpenUse 或 macOS 指明的启动终端；程序不会替你勾选系统权限。若列表里没有目标，可用 `/open-use-permissions` 查看本机原生程序路径，并在设置中手动添加。
+
+未授权时显示 `Open Use 待授权 [检查]`，此时不会向模型注册操作工具。完成授权后点击 `[检查]`（或 `/open-use-check`）重新检测。连接初始化完成后才显示「开」，准备或连接失败不会假装开启。主开关在待授权、准备中也可随时关闭。
+
+这个入口自动注册本地 `open_use_tui_*` 工具，不必手工复制 MCP 配置；模型会同时收到使用规则。工具仅允许当前可见会话调用，切换会话或目录时会关闭旧原生进程和窗口绑定并重新连接。退出或关闭开关会撤销本客户端工具并关闭尚未完成的本机确认；已经派发的动作不能撤回。设置保存在本机 TUI 状态中，重新启动时会再次检查权限。
+
+该开关不修改你手动配置的独立 MCP 服务。若此前添加了下文的 `open_use`，请通过 `/mcp` 单独停用，以免误以为关闭客户端开关就停用了所有独立服务。真实点击/输入仍需逐次本机确认。
+
+### 可选：独立 MCP 配置
+
 运行下面的命令生成适合当前启动方式的 MCP 配置：
 
 ```bash
@@ -119,4 +133,5 @@ OpenCode-Lychee open-use doctor --allow-input
 ## 实现参考
 
 - [Apple：窗口鼠标事件穿透](https://developer.apple.com/documentation/appkit/nswindow/ignoresmouseevents)
+- [Apple：允许辅助功能应用访问 Mac](https://support.apple.com/guide/mac-help/mh43185/mac)
 - [MCP：服务与工具接入](https://modelcontextprotocol.io/docs/develop/build-server)

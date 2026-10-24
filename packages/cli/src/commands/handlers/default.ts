@@ -56,7 +56,10 @@ export default Runtime.handler(Commands, (input) =>
       session !== undefined &&
       (yield* Effect.tryPromise({
         try: () =>
-          findSession(OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) }), session),
+          findSession(
+            OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) }),
+            session,
+          ),
         catch: (cause) => new Error(errorMessage(cause)),
       })) !== undefined
     const updater = yield* Updater.Service
@@ -116,6 +119,19 @@ export default Runtime.handler(Commands, (input) =>
         prompt: Option.getOrUndefined(input.prompt),
         auto: input.auto || input.yolo || input.dangerouslySkipPermissions,
       },
+      openUse:
+        process.platform === "darwin"
+          ? {
+              async prepare() {
+                const { prepareOpenUse } = await import("../../open-use/host")
+                return prepareOpenUse()
+              },
+              async openSettings() {
+                const { openOpenUseSettings } = await import("../../open-use/host")
+                return openOpenUseSettings()
+              },
+            }
+          : undefined,
       config: {
         path: config.path,
         get: () => runPromise(config.get()),

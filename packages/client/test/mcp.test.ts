@@ -19,9 +19,12 @@ afterEach(async () => {
 describe("connectClientMcp", () => {
   test("serves registered tools to the opencode server", async () => {
     const server = serve()
+    const statuses: boolean[] = []
     const connection = connectClientMcp({
       url: server.url + "?ticket=t1",
       name: "tui",
+      instructions: "Read the local tool guide before using this computer.",
+      onStatus: (connected) => statuses.push(connected),
       directory: "/repo",
       headers: { authorization: "Basic secret" },
       tools: [
@@ -44,6 +47,7 @@ describe("connectClientMcp", () => {
       ],
     })
     const peer = await server.next()
+    expect(peer.client.getInstructions()).toBe("Read the local tool guide before using this computer.")
 
     const url = new URL(peer.request.url)
     expect(url.pathname).toBe("/api/experimental/client-mcp")
@@ -53,6 +57,7 @@ describe("connectClientMcp", () => {
     expect(peer.request.headers.get("authorization")).toBe("Basic secret")
 
     await peer.client.ping()
+    expect(statuses).toEqual([true])
     expect((await peer.client.listTools()).tools).toEqual([
       { name: "whoami", description: "Return the calling session", inputSchema: { type: "object" } },
       {
@@ -78,6 +83,7 @@ describe("connectClientMcp", () => {
     await expect(peer.client.callTool({ name: "missing", arguments: {} })).rejects.toThrow("Unknown tool: missing")
 
     await connection.close()
+    expect(statuses).toEqual([true, false])
     await peer.closed
   })
 

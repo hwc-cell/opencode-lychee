@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { isolatedEnv } from "./fixture/environment"
 import { createOpenUseServer } from "../src/open-use/server"
+import { prepareOpenUse } from "../src/open-use/host"
 
 test("Open Use teaches exact-window input boundaries and rejects unapproved or invalid requests before opening UI", async () => {
   const use = createOpenUseServer()
@@ -81,6 +82,26 @@ test("Open Use teaches exact-window input boundaries and rejects unapproved or i
     use.close()
   }
 })
+
+// The local TUI host is macOS-only. Listing tools and reading the guide must not start native UI.
+test.skipIf(process.platform !== "darwin")(
+  "local TUI host carries model instructions and revokes old handlers on close",
+  async () => {
+    const bridge = await prepareOpenUse()
+    try {
+      expect(bridge.instructions).toContain("window-bound")
+      const guide = bridge.tools.find((tool) => tool.name === "guide")
+      if (!guide) throw new Error("Open Use guide missing")
+      expect(JSON.stringify(await guide.handler({}, { sessionID: "ses_local" }))).toContain("origin TOP LEFT")
+      await bridge.close()
+      const denied = await guide.handler({}, { sessionID: "ses_local" })
+      expect(denied.isError).toBe(true)
+      expect(JSON.stringify(denied)).toContain("disabled")
+    } finally {
+      await bridge.close()
+    }
+  },
+)
 
 // The stdio command is deliberately macOS-only; this checks CLI routing and a clean protocol stream without opening UI.
 test.skipIf(process.platform !== "darwin")("source CLI serves Open Use over stdio from another project", async () => {

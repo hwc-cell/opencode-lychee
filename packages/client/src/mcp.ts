@@ -8,6 +8,8 @@ export type ClientMcpOptions = {
   /** Handshake headers, such as `authorization`. Browsers cannot send them; use a ticket in `url` instead. */
   readonly headers?: Record<string, string>
   readonly tools: ReadonlyArray<ClientMcpTool>
+  readonly instructions?: string
+  readonly onStatus?: (connected: boolean) => void
   readonly WebSocket?: typeof WebSocket
 }
 
@@ -80,7 +82,10 @@ export function connectClientMcp(options: ClientMcpOptions): ClientMcpConnection
       const message = parse(event.data)
       if (!message) return
       // Reset backoff only once the opencode server finished initializing, so a failed attach keeps backing off.
-      if (message.method === "notifications/initialized") state.delay = RECONNECT_MIN
+      if (message.method === "notifications/initialized") {
+        state.delay = RECONNECT_MIN
+        options.onStatus?.(true)
+      }
       // Notifications and responses need no reply.
       if ((typeof message.id !== "string" && typeof message.id !== "number") || typeof message.method !== "string")
         return
@@ -91,6 +96,7 @@ export function connectClientMcp(options: ClientMcpOptions): ClientMcpConnection
     socket.addEventListener("close", () => {
       if (state.socket === socket) state.socket = undefined
       if (state.disposed) return
+      options.onStatus?.(false)
       state.timer = setTimeout(connect, state.delay)
       state.delay = Math.min(state.delay * 2, RECONNECT_MAX)
     })
@@ -101,6 +107,7 @@ export function connectClientMcp(options: ClientMcpOptions): ClientMcpConnection
   return {
     async close() {
       state.disposed = true
+      options.onStatus?.(false)
       clearTimeout(state.timer)
       state.socket?.close(1000)
     },
@@ -116,6 +123,7 @@ async function respond(options: ClientMcpOptions, method: string, params: Messag
           protocolVersion: typeof params?.protocolVersion === "string" ? params.protocolVersion : PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: { name: options.name, version: "1.0.0" },
+          ...(options.instructions ? { instructions: options.instructions } : {}),
         },
       }
     case "ping":

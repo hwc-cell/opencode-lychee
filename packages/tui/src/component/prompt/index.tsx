@@ -71,6 +71,7 @@ import { useWorkingDirectoryActions } from "../../ui/working-directory-actions"
 import { truncateFilePath } from "../../ui/file-path"
 import { PromptMetadataRow } from "./metadata"
 import { toggleVoiceRecording, useVoiceDictation, voiceToolInstalled } from "../../util/voice"
+import { OpenUseToggle } from "./open-use"
 
 export type PromptProps = {
   sessionID?: string
@@ -1985,6 +1986,7 @@ export function Prompt(props: PromptProps) {
                     : "🎤 ctrl+r 语音"}
               </text>
             </Show>
+            <OpenUseToggle />
             <Slot path="prompt.footer.file" input={footerInput()}>
               <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
                 {(file) => (

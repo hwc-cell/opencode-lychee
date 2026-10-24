@@ -109,6 +109,8 @@ import { AttentionProvider } from "./context/attention"
 import { StorageProvider, useStorage } from "./context/storage"
 import { SessionTerminalsProvider } from "./context/session-terminals"
 import { ClientMcp } from "./context/client-mcp"
+import { OpenUseRuntime } from "./context/open-use"
+import type { OpenUseHost } from "./open-use"
 import { PanelProvider, usePanel } from "./context/panel"
 import { SessionFrame } from "./component/session-frame"
 import { createTuiClipboard } from "./clipboard"
@@ -195,6 +197,7 @@ export type TuiInput = {
   args: Args
   config: Config.Interface
   updater?: UpdateSource
+  openUse?: OpenUseHost
   packages: PackageSource
   environment?: Readonly<Record<string, string>>
   terminalHandoff?: () => Promise<
@@ -432,7 +435,9 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                                                 packages={input.packages}
                                                                                 directories={pluginDirectories}
                                                                               >
-                                                                                <App />
+                                                                                <OpenUseRuntime host={input.openUse}>
+                                                                                  <App />
+                                                                                </OpenUseRuntime>
                                                                               </PluginProvider>
                                                                             </PanelProvider>
                                                                           </UpdateNotificationProvider>
