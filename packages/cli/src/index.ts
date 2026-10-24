@@ -70,6 +70,7 @@ const Handlers = Runtime.handlers(Commands, {
     autostop: () => import("./commands/handlers/weixin/autostop"),
     logout: () => import("./commands/handlers/weixin/logout"),
   },
+  "open-use": () => import("./commands/handlers/open-use"),
   voice: () => import("./commands/handlers/voice"),
   stats: () => import("./commands/handlers/stats"),
   mini: () => import("./commands/handlers/mini"),

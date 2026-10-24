@@ -25,6 +25,7 @@
     "typecheck:tsc": "tsc -b"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
     "@agentclientprotocol/sdk": "1.6.0",
     "@clack/core": "1.0.0-alpha.1",
     "@clack/prompts": "1.0.0-alpha.1",
@@ -55,6 +56,7 @@
     "ws": "8.21.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
     "@opencode/script": "workspace:*",
     "@opencode/protocol": "workspace:*",
     "@tsconfig/bun": "catalog:",

@@ -362,6 +362,13 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         Spec.make("logout", { description: "Sign out and clear local WeChat bridge state" }),
       ],
     }),
+    Spec.make("open-use", {
+      description: "Open Use: macOS model cursor (visual indicator only)",
+      params: {
+        action: Argument.Literals("action", ["demo", "preview", "mcp", "config", "guide"]),
+        output: Flag.String("output").pipe(Flag.withDescription("PNG output path for preview"), Flag.optional),
+      },
+    }),
     Spec.make("voice", {
       description: "Manage Lychee voice dictation on macOS",
       params: {
