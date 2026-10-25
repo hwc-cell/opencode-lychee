@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Layer, Stream } from "effect"
 import { HttpClientRequest } from "effect/http"
-import { Image, ImageClient, Media } from "../src/index.js"
+import { Image, ImageClient, Media } from "../src/effect.js"
 import {
   BlackForestLabs,
   Fal,
@@ -167,6 +167,68 @@ describe("Image", () => {
       })
       expect(response.providerMetadata).toEqual({ openai: {} })
     }),
+  )
+
+  it.effect("classifies an OpenAI stream moderation error event as a content policy rejection", () =>
+    Effect.gen(function* () {
+      const error = yield* Image.stream({
+        model: OpenAI.configure({ apiKey: "test", baseURL: "https://openai.test/v1" }).image("gpt-image-1-mini"),
+        prompt: "A lighthouse",
+      }).pipe(Stream.runDrain, Effect.flip)
+      expect(error.reason._tag).toBe("ContentPolicy")
+      expect(error.message).toContain("rejected by the safety system")
+    }).pipe(
+      Effect.provide(
+        layer((input) =>
+          Effect.succeed(
+            input.respond(
+              `event: error\ndata: ${JSON.stringify({
+                type: "error",
+                error: {
+                  type: "image_generation_user_error",
+                  code: "moderation_blocked",
+                  message:
+                    "Your request was rejected by the safety system. If you believe this is an error, contact us at help.openai.com and include the request ID req_123.",
+                  param: null,
+                },
+                sequence_number: 0,
+              })}\n\n`,
+              { headers: { "content-type": "text/event-stream" } },
+            ),
+          ),
+        ),
+      ),
+    ),
+  )
+
+  it.effect("ignores unknown OpenAI image stream events", () =>
+    Effect.gen(function* () {
+      const events = yield* Image.stream({
+        model: OpenAI.configure({ apiKey: "test", baseURL: "https://openai.test/v1" }).image("gpt-image-1-mini"),
+        prompt: "A lighthouse",
+      }).pipe(Stream.runCollect)
+      expect(Array.from(events).map((event) => event.type)).toEqual(["image", "finish"])
+    }).pipe(
+      Effect.provide(
+        layer((input) =>
+          Effect.succeed(
+            input.respond(
+              [
+                { type: "image_generation.in_progress", sequence_number: 0 },
+                {
+                  type: "image_generation.completed",
+                  b64_json: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"),
+                  output_format: "png",
+                },
+              ]
+                .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+                .join(""),
+              { headers: { "content-type": "text/event-stream" } },
+            ),
+          ),
+        ),
+      ),
+    ),
   )
 
   it.effect("lowers aspect to the nearest OpenAI size and reports the substitution", () =>
