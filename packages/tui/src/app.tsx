@@ -191,6 +191,7 @@ export type TuiInput = {
   app: TuiApp
   server: {
     endpoint: Endpoint
+    local?: boolean
     service?: {
       reconnect: (signal: AbortSignal) => Promise<Endpoint>
       restart: () => Promise<void>
@@ -364,6 +365,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                               value={{
                                 platform: process.platform,
                                 variables: input.environment,
+                                localServer: input.server.local,
                               }}
                             >
                               <TuiStartupProvider
