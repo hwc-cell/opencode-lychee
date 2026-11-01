@@ -94,6 +94,8 @@ test.skipIf(process.platform !== "darwin")(
       if (!guide) throw new Error("Open Use guide missing")
       expect(JSON.stringify(await guide.handler({}, { sessionID: "ses_local" }))).toContain("origin TOP LEFT")
       await bridge.close()
+      expect(bridge.disconnected).toBeInstanceOf(Promise)
+      await bridge.disconnected
       const denied = await guide.handler({}, { sessionID: "ses_local" })
       expect(denied.isError).toBe(true)
       expect(JSON.stringify(denied)).toContain("disabled")

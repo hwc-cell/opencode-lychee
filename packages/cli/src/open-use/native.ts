@@ -48,6 +48,7 @@ const reply = Schema.Struct({
           label: Schema.String,
           text: Schema.optional(Schema.String),
           actions: Schema.Array(Schema.String),
+          enabled: Schema.optional(Schema.Boolean),
           editable: Schema.Boolean,
           bounds: Schema.optional(
             Schema.Struct({ x: Schema.Number, y: Schema.Number, width: Schema.Number, height: Schema.Number }),
@@ -118,6 +119,8 @@ export type CursorInput =
 
 export class NativeCursor {
   constructor(private readonly allowInput = false) {}
+  private readonly stop = Promise.withResolvers<void>()
+  readonly stopped = this.stop.promise
   private child?: ReturnType<typeof spawn>
   private starting?: Promise<void>
   private sequence = 0
@@ -177,9 +180,11 @@ export class NativeCursor {
   }
 
   close() {
+    if (this.closed) return
     this.closed = true
     this.child?.kill()
     for (const request of this.pending.values()) request.reject(new Error("Open Use 光标连接已关闭。"))
     this.pending.clear()
+    this.stop.resolve()
   }
 }

@@ -69,6 +69,15 @@ export function OpenUseProvider(props: ParentProps<{ host?: OpenUseHost; scope: 
         return
       }
       active = bridge
+      void bridge.disconnected?.then(async () => {
+        if (!valid(token)) return
+        const stopping = retire()
+        const stopped = generation
+        await stopping
+        if (disposed || generation !== stopped || !view.desired) return
+        setView("phase", "error")
+        toast.show({ variant: "error", message: "Open Use 原生程序已停止，请点击「重试」重新连接。" })
+      })
       const permissions = await bridge.permissions()
       if (!valid(token)) return
       setView("executable", permissions.executable)

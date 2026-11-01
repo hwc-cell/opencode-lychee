@@ -1,6 +1,7 @@
 import type { ClientMcpTool } from "@opencode/client/mcp"
 
 export type OpenUseBridge = {
+  readonly disconnected?: Promise<void>
   readonly instructions: string
   readonly tools: ReadonlyArray<ClientMcpTool>
   permissions(): Promise<{ accessibility: boolean; executable: string }>

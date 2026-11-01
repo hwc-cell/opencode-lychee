@@ -32,9 +32,18 @@ async function start(width: number, supported = true) {
   const temporary = await tmpdir()
   const mounted = Promise.withResolvers<void>()
   const finalizers = new Set<() => Promise<void>>()
-  const records: Array<{ closed: boolean; calls: number; disposed: ReturnType<typeof Promise.withResolvers<void>> }> =
-    []
-  const hardware = { authorized: false, settingsOpened: 0, pause: undefined as Promise<void> | undefined }
+  const records: Array<{
+    closed: boolean
+    calls: number
+    disposed: ReturnType<typeof Promise.withResolvers<void>>
+    disconnected: ReturnType<typeof Promise.withResolvers<void>>
+  }> = []
+  const hardware = {
+    authorized: false,
+    settingsOpened: 0,
+    failPrepare: false,
+    pause: undefined as Promise<void> | undefined,
+  }
   let prepared = Promise.withResolvers<void>()
   const responses = new Map<number, ReturnType<typeof Promise.withResolvers<unknown>>>()
   let nextID = 10
@@ -108,11 +117,18 @@ async function start(width: number, supported = true) {
   })
   const host: OpenUseHost = {
     async prepare() {
-      const record = { closed: false, calls: 0, disposed: Promise.withResolvers<void>() }
+      const record = {
+        closed: false,
+        calls: 0,
+        disposed: Promise.withResolvers<void>(),
+        disconnected: Promise.withResolvers<void>(),
+      }
       records.push(record)
       prepared.resolve()
+      if (hardware.failPrepare) throw new Error("Open Use fixture preparation failed")
       if (hardware.pause) await hardware.pause
       const bridge: OpenUseBridge = {
+        disconnected: record.disconnected.promise,
         instructions: "Open Use fixture: only the active local session may call tools.",
         tools: [
           {
@@ -129,6 +145,7 @@ async function start(width: number, supported = true) {
         async close() {
           record.closed = true
           record.disposed.resolve()
+          record.disconnected.resolve()
         },
       }
       return bridge
@@ -299,4 +316,38 @@ test("onboarding, permission recheck, exact-session tool routing, shutdown and p
   await app.records[3].disposed.promise
   expect(app.records[3].closed).toBe(true)
   expect(app.hardware.settingsOpened).toBe(1)
+})
+
+test("prepare failure and native exit expose a retry that reconnects without replaying actions", async () => {
+  await using app = await start(100)
+  app.hardware.authorized = true
+  app.hardware.failPrepare = true
+  await app.click()
+  await app.waitForFrame((frame) => frame.includes("开启并前往设置"))
+  app.mockInput.pressEnter()
+  await app.waitForFrame((frame) => frame.includes("Open Use 异常 [重试]"))
+  expect(app.records).toHaveLength(1)
+
+  app.hardware.failPrepare = false
+  await app.click("prompt.footer.open-use.check")
+  const first = await app.nextPeer()
+  await app.waitForFrame((frame) => frame.includes("Open Use 开"))
+  expect(app.records).toHaveLength(2)
+  expect(app.records[1].calls).toBe(0)
+
+  app.records[1].disconnected.resolve()
+  await first.closed
+  await app.waitForFrame((frame) => frame.includes("Open Use 异常 [重试]"))
+  expect(app.records[1].closed).toBe(true)
+  expect(app.records).toHaveLength(2)
+
+  await app.click("prompt.footer.open-use.check")
+  const second = await app.nextPeer()
+  await app.waitForFrame((frame) => frame.includes("Open Use 开"))
+  expect(app.records).toHaveLength(3)
+  expect(app.records[2].calls).toBe(0)
+  expect(await second.call("ses_visible")).toMatchObject({ content: [{ text: "local guide" }] })
+  await app.click()
+  await second.closed
+  await app.waitForFrame((frame) => frame.includes("Open Use 关"))
 })

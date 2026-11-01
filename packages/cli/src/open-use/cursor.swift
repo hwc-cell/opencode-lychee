@@ -76,6 +76,7 @@ struct ObservedControl: Encodable {
     let label: String
     let text: String?
     let actions: [String]
+    let enabled: Bool?
     let editable: Bool
     let bounds: WindowBounds?
 }
@@ -94,9 +95,15 @@ struct OpenUseError: LocalizedError {
 
 @MainActor
 final class CursorView: NSView {
+    var drawingOrigin = NSPoint.zero
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let translation = NSAffineTransform()
+        translation.translateX(by: drawingOrigin.x, yBy: drawingOrigin.y)
+        translation.concat()
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.24)
         shadow.shadowBlurRadius = 5
@@ -130,8 +137,9 @@ final class CursorView: NSView {
 }
 
 @MainActor
-final class CursorController {
+final class CursorController: NSObject {
     private let panel: NSPanel
+    private let pointer = CursorView(frame: NSRect(x: 0, y: 0, width: 154, height: 68))
     private var buffer = Data()
     private var expiration: Task<Void, Never>?
     private var tracking: Task<Void, Never>?
@@ -142,6 +150,7 @@ final class CursorController {
     private var controls: [Int: AXUIElement] = [:]
     private var confirming = false
     private var readApproved: UInt32?
+    private var desktopOwner: pid_t?
     private var state = CursorState(visible: false, displayID: nil, x: nil, y: nil)
 
     init(allowInput: Bool) {
@@ -150,16 +159,26 @@ final class CursorController {
             contentRect: NSRect(x: 0, y: 0, width: 154, height: 68),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false
         )
+        super.init()
         panel.title = "Open Use — 模型光标（仅指示）"
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
-        panel.isFloatingPanel = true
-        panel.level = .statusBar
+        panel.isFloatingPanel = false
+        panel.level = .normal
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        panel.contentView = CursorView(frame: NSRect(x: 0, y: 0, width: 154, height: 68))
+        panel.contentView = pointer
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(frontmostChanged(_:)),
+            name: NSWorkspace.didActivateApplicationNotification, object: nil
+        )
+    }
+
+    @objc private func frontmostChanged(_ notification: Notification) {
+        let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        if app?.processIdentifier != (selected?.pid ?? desktopOwner) { panel.orderOut(nil) }
     }
 
     private func screenID(_ screen: NSScreen) -> String {
@@ -178,6 +197,7 @@ final class CursorController {
         expiration = nil
         tracking?.cancel()
         tracking = nil
+        desktopOwner = nil
         panel.orderOut(nil)
         state = CursorState(visible: false, displayID: state.displayID, x: state.x, y: state.y)
     }
@@ -186,6 +206,9 @@ final class CursorController {
         if let bound = selected {
             if let fresh = windows(bound.id).first, fresh.pid == bound.pid { selected = fresh }
             else { releaseWindow() }
+        }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != (selected?.pid ?? desktopOwner) {
+            panel.orderOut(nil)
         }
         var result = CursorState(visible: panel.isVisible, displayID: state.displayID, x: state.x, y: state.y, window: selected)
         result.coordinateSpace = selected == nil ? "display" : "window"
@@ -220,7 +243,8 @@ final class CursorController {
     }
 
     private func placeWindowPointer(x: Double, y: Double) -> Bool {
-        guard let bound = selected, let fresh = windows(bound.id).first, fresh.pid == bound.pid,
+        let visible = windows()
+        guard let bound = selected, let fresh = visible.first(where: { $0.id == bound.id }), fresh.pid == bound.pid,
               x.isFinite, y.isFinite, x >= 0, y >= 0, x < fresh.bounds.width, y < fresh.bounds.height,
               let primary = NSScreen.screens.first else { return false }
         // CGWindow bounds use Quartz global top-left points; AppKit uses bottom-left points.
@@ -229,9 +253,21 @@ final class CursorController {
             point.x >= $0.frame.minX && point.x < $0.frame.maxX && point.y > $0.frame.minY && point.y <= $0.frame.maxY
         }) else { return false }
         selected = fresh
-        panel.setFrameOrigin(NSPoint(x: point.x - 22, y: point.y - (panel.frame.height - 22)))
-        panel.orderFrontRegardless()
-        state = CursorState(visible: true, displayID: screenID(screen), x: x, y: y)
+        let frame = NSRect(x: point.x - 22, y: point.y - 46, width: 154, height: 68)
+        let windowFrame = NSRect(x: fresh.bounds.x, y: primary.frame.maxY - fresh.bounds.y - fresh.bounds.height,
+                                 width: fresh.bounds.width, height: fresh.bounds.height)
+        let clipped = frame.intersection(windowFrame).intersection(screen.frame)
+        let covered = visible.prefix(while: { $0.id != fresh.id }).contains {
+            NSRect(x: $0.bounds.x, y: primary.frame.maxY - $0.bounds.y - $0.bounds.height,
+                   width: $0.bounds.width, height: $0.bounds.height).intersects(clipped)
+        }
+        panel.setFrame(clipped, display: false)
+        pointer.drawingOrigin = NSPoint(x: frame.minX - clipped.minX, y: clipped.maxY - frame.maxY)
+        pointer.needsDisplay = true
+        if !confirming, !covered, NSWorkspace.shared.frontmostApplication?.processIdentifier == fresh.pid {
+            panel.orderFront(nil)
+        } else { panel.orderOut(nil) }
+        state = CursorState(visible: panel.isVisible, displayID: screenID(screen), x: x, y: y)
         return true
     }
 
@@ -301,10 +337,13 @@ final class CursorController {
                                    error: "Invalid display or coordinates. Use display-local logical points and seconds in 1...30.")
             }
             expiration?.cancel()
+            desktopOwner = NSWorkspace.shared.frontmostApplication?.processIdentifier
             // Tool coordinates start at the selected display's top-left, in points, not Retina pixels.
-            panel.setFrameOrigin(NSPoint(x: screen.frame.minX + x - 22,
-                                         y: screen.frame.maxY - y - (panel.frame.height - 22)))
-            panel.orderFrontRegardless()
+            pointer.drawingOrigin = .zero
+            panel.setFrame(NSRect(x: screen.frame.minX + x - 22, y: screen.frame.maxY - y - 46,
+                                  width: 154, height: 68), display: false)
+            pointer.needsDisplay = true
+            panel.orderFront(nil)
             state = CursorState(visible: true, displayID: screenID(screen), x: x, y: y)
             expire(after: seconds)
             return CursorReply(id: command.id, ok: true, state: currentState())
@@ -435,6 +474,7 @@ private extension CursorController {
             let index = rows.count
             let role = attribute(element, kAXRoleAttribute) as? String ?? "unknown"
             let secure = (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole
+            let enabled = attribute(element, kAXEnabledAttribute) as? Bool
             var names: CFArray?
             AXUIElementCopyActionNames(element, &names)
             let bounds: WindowBounds?
@@ -447,7 +487,8 @@ private extension CursorController {
                                         text: role == kAXStaticTextRole && !secure
                                             ? (attribute(element, kAXValueAttribute) as? String).map { String($0.prefix(160)) } : nil,
                                         actions: names as? [String] ?? [],
-                                        editable: !secure && settable(element, kAXSelectedTextAttribute), bounds: bounds))
+                                        enabled: enabled,
+                                        editable: !secure && enabled != false && settable(element, kAXSelectedTextAttribute), bounds: bounds))
             if !secure, let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
                 for child in children { visit(child, parent: index, depth: depth + 1) }
             }
@@ -462,6 +503,7 @@ private extension CursorController {
         guard !confirming else { throw OpenUseError("已有本地确认正在等待，请勿并发提交真实操作。") }
         confirming = true
         defer { confirming = false }
+        panel.orderOut(nil)
         let alert = NSAlert()
         alert.messageText = "允许 Open Use 执行这一次操作吗？"
         alert.informativeText = "应用：\(window.app)\n窗口：\(window.title ?? "标题不可用")（ID \(window.id)）\n\(summary)\n\n仅对当前绑定窗口执行一次；模型不能批准此对话框。"
@@ -499,6 +541,9 @@ private extension CursorController {
         if (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole {
             throw OpenUseError("安全输入框必须由用户手动填写。")
         }
+        guard (attribute(element, kAXEnabledAttribute) as? Bool) != false else {
+            throw OpenUseError("此控件已禁用，未执行操作。请等待控件可用后重新观察。")
+        }
         let originalLabel = label(element)
         if command.action == "click" {
             var actions: CFArray?
@@ -520,6 +565,9 @@ private extension CursorController {
         }
         guard (attribute(element, kAXSubroleAttribute) as? String) != kAXSecureTextFieldSubrole else {
             throw OpenUseError("确认期间控件变成了安全输入框，必须交给用户手动填写。")
+        }
+        guard (attribute(element, kAXEnabledAttribute) as? Bool) != false else {
+            throw OpenUseError("确认期间控件已禁用，未执行操作，请重新观察。")
         }
         // Consume the observation before the side effect: even a partial/unknown failure must not be replayed blindly.
         invalidateObservation()

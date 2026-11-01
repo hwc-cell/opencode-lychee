@@ -14,7 +14,7 @@ export function OpenUseToggle() {
       : control?.phase === "permission"
         ? "待授权"
         : control?.phase === "error"
-          ? "重试"
+          ? "异常"
           : control?.phase === "preparing"
             ? "准备中"
             : control?.phase === "connecting"

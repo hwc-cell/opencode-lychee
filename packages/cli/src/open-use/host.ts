@@ -28,6 +28,7 @@ export async function prepareOpenUse(): Promise<OpenUseBridge> {
     await Promise.all([use.server.connect(remote), client.connect(local)])
     const result = await client.listTools()
     return {
+      disconnected: use.stopped,
       instructions: client.getInstructions() ?? "",
       tools: result.tools.map((tool) => ({
         name: tool.name,
