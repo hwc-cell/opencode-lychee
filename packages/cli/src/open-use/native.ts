@@ -79,14 +79,22 @@ export async function cursorBinary() {
   const sourcePath = path.join(import.meta.dir, "cursor.swift")
   const source = Bun.file(sourcePath)
   if (!(await source.exists())) throw new Error("Open Use 原生源码缺失，请从 OpenCode-Lychee 源码仓库启动。")
+  const icon = Bun.file(path.join(import.meta.dir, "cursor-arrow.png"))
+  if (!(await icon.exists())) throw new Error("Open Use 光标图片缺失，请使用完整的 OpenCode-Lychee 源码仓库。")
   const hash = new Bun.CryptoHasher("sha256")
     .update(await source.arrayBuffer())
+    .update(await icon.arrayBuffer())
     .digest("hex")
     .slice(0, 16)
   const directory = path.join(Global.Path.cache, "open-use", `${hash}-${process.arch}`)
   const binary = path.join(directory, "OpenUse")
-  if (await Bun.file(binary).exists()) return binary
+  const cachedIcon = path.join(directory, "cursor-arrow.png")
+  if ((await Bun.file(binary).exists()) && (await Bun.file(cachedIcon).exists())) return binary
   await mkdir(directory, { recursive: true })
+  const temporaryIcon = `${cachedIcon}.${crypto.randomUUID()}`
+  await Bun.write(temporaryIcon, icon)
+  await rename(temporaryIcon, cachedIcon)
+  if (await Bun.file(binary).exists()) return binary
   const temporary = path.join(directory, `OpenUse-${crypto.randomUUID()}`)
   const child = Bun.spawn(
     [

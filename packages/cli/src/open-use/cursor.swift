@@ -95,8 +95,19 @@ struct OpenUseError: LocalizedError {
 
 @MainActor
 final class CursorView: NSView {
+    static let canvas = NSSize(width: 32, height: 32)
+    // The approved PNG's visible crop is 814 pixels wide; its rounded northwest tip is (29, 21) within it.
+    static let hotspot = NSPoint(x: 29 * 32.0 / 814, y: 21 * 32.0 / 814)
+    private let image: NSImage
     var drawingOrigin = NSPoint.zero
     override var isFlipped: Bool { true }
+
+    init(image: NSImage) {
+        self.image = image
+        super.init(frame: NSRect(origin: .zero, size: Self.canvas))
+    }
+
+    required init?(coder: NSCoder) { nil }
 
     override func draw(_ dirtyRect: NSRect) {
         NSGraphicsContext.saveGraphicsState()
@@ -104,42 +115,18 @@ final class CursorView: NSView {
         let translation = NSAffineTransform()
         translation.translateX(by: drawingOrigin.x, yBy: drawingOrigin.y)
         translation.concat()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.24)
-        shadow.shadowBlurRadius = 5
-        shadow.shadowOffset = NSSize(width: 0, height: -2)
-        NSGraphicsContext.saveGraphicsState()
-        shadow.set()
-        let ring = NSBezierPath(ovalIn: NSRect(x: 10, y: 10, width: 24, height: 24))
-        NSColor.white.setStroke()
-        ring.lineWidth = 5
-        ring.stroke()
-        let red = NSColor(srgbRed: 232 / 255, green: 76 / 255, blue: 70 / 255, alpha: 1)
-        red.withAlphaComponent(0.15).setFill()
-        ring.fill()
-        red.setStroke()
-        ring.lineWidth = 2
-        ring.stroke()
-        red.setFill()
-        NSBezierPath(ovalIn: NSRect(x: 19, y: 19, width: 6, height: 6)).fill()
-        let badge = NSBezierPath(roundedRect: NSRect(x: 40, y: 30, width: 98, height: 25), xRadius: 12, yRadius: 12)
-        NSColor(srgbRed: 32 / 255, green: 52 / 255, blue: 63 / 255, alpha: 0.96).setFill()
-        badge.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        let name = NSAttributedString(string: "Open Use", attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: NSColor.white,
-        ])
-        name.draw(at: NSPoint(x: 57, y: 34))
-        NSColor(srgbRed: 126 / 255, green: 176 / 255, blue: 60 / 255, alpha: 1).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 48, y: 40, width: 5, height: 5)).fill()
+        // Ignore the transparent margin while preserving the approved image's proportions and alpha.
+        image.draw(in: NSRect(x: 0, y: 0, width: 32, height: 790 * 32.0 / 814),
+                   from: NSRect(x: 225, y: 213, width: 814, height: 790),
+                   operation: .sourceOver, fraction: 1, respectFlipped: true,
+                   hints: [.interpolation: NSImageInterpolation.high])
     }
 }
 
 @MainActor
 final class CursorController: NSObject {
     private let panel: NSPanel
-    private let pointer = CursorView(frame: NSRect(x: 0, y: 0, width: 154, height: 68))
+    private let pointer: CursorView
     private var buffer = Data()
     private var expiration: Task<Void, Never>?
     private var tracking: Task<Void, Never>?
@@ -153,10 +140,11 @@ final class CursorController: NSObject {
     private var desktopOwner: pid_t?
     private var state = CursorState(visible: false, displayID: nil, x: nil, y: nil)
 
-    init(allowInput: Bool) {
+    init(allowInput: Bool, image: NSImage) {
         self.allowInput = allowInput
+        pointer = CursorView(image: image)
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 154, height: 68),
+            contentRect: NSRect(origin: .zero, size: CursorView.canvas),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false
         )
         super.init()
@@ -253,7 +241,9 @@ final class CursorController: NSObject {
             point.x >= $0.frame.minX && point.x < $0.frame.maxX && point.y > $0.frame.minY && point.y <= $0.frame.maxY
         }) else { return false }
         selected = fresh
-        let frame = NSRect(x: point.x - 22, y: point.y - 46, width: 154, height: 68)
+        let frame = NSRect(x: point.x - CursorView.hotspot.x,
+                           y: point.y - (CursorView.canvas.height - CursorView.hotspot.y),
+                           width: CursorView.canvas.width, height: CursorView.canvas.height)
         let windowFrame = NSRect(x: fresh.bounds.x, y: primary.frame.maxY - fresh.bounds.y - fresh.bounds.height,
                                  width: fresh.bounds.width, height: fresh.bounds.height)
         let clipped = frame.intersection(windowFrame).intersection(screen.frame)
@@ -340,8 +330,9 @@ final class CursorController: NSObject {
             desktopOwner = NSWorkspace.shared.frontmostApplication?.processIdentifier
             // Tool coordinates start at the selected display's top-left, in points, not Retina pixels.
             pointer.drawingOrigin = .zero
-            panel.setFrame(NSRect(x: screen.frame.minX + x - 22, y: screen.frame.maxY - y - 46,
-                                  width: 154, height: 68), display: false)
+            panel.setFrame(NSRect(x: screen.frame.minX + x - CursorView.hotspot.x,
+                                  y: screen.frame.maxY - y - (CursorView.canvas.height - CursorView.hotspot.y),
+                                  width: CursorView.canvas.width, height: CursorView.canvas.height), display: false)
             pointer.needsDisplay = true
             panel.orderFront(nil)
             state = CursorState(visible: true, displayID: screenID(screen), x: x, y: y)
@@ -589,8 +580,13 @@ private extension CursorController {
 func main() {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
+    let asset = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("cursor-arrow.png")
+    guard let image = NSImage(contentsOf: asset), image.isValid else {
+        FileHandle.standardError.write(Data("Open Use: cursor-arrow.png is missing or invalid; reconnect from the source checkout.\n".utf8))
+        exit(1)
+    }
     if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--preview" {
-        let view = CursorView(frame: NSRect(x: 0, y: 0, width: 154, height: 68))
+        let view = CursorView(image: image)
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { exit(1) }
@@ -598,7 +594,7 @@ func main() {
         catch { FileHandle.standardError.write(Data("Open Use: cannot write preview\n".utf8)); exit(1) }
         return
     }
-    let controller = CursorController(allowInput: CommandLine.arguments.contains("--allow-input"))
+    let controller = CursorController(allowInput: CommandLine.arguments.contains("--allow-input"), image: image)
     // File descriptor callbacks bridge into the single AppKit actor; no UI state leaves it.
     FileHandle.standardInput.readabilityHandler = { handle in
         let data = handle.availableData

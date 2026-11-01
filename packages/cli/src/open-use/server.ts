@@ -2,8 +2,8 @@ import { fromJsonSchema, McpServer } from "@modelcontextprotocol/server"
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio"
 import { NativeCursor } from "./native"
 
-export const instructions = `Open Use — macOS window-bound circular pointer and accessibility actions.
-The circle is independent of the real mouse. This server does not capture screenshots or send global mouse/keyboard events.
+export const instructions = `Open Use — macOS window-bound arrow pointer and accessibility actions.
+The gray-blue arrow is independent of the real mouse. This server does not capture screenshots or send global mouse/keyboard events.
 Real click/type_text actions are OFF unless the user enables the local TUI switch or starts MCP with --allow-input;
 model tool arguments cannot enable them. Check permissions for the current input opt-in state.
 1. Call guide, then windows to list visible normal windows. This reads metadata only, not window content.
@@ -11,6 +11,7 @@ model tool arguments cannot enable them. Check permissions for the current input
    If the choice is ambiguous, ask. Window titles can be unavailable without OS permission; do not invent them.
 2. Call select_window with its windowID. Then call window_cursor with that SAME windowID and x/y in
    window-local LOGICAL POINTS, origin TOP LEFT of the WHOLE window including its title bar.
+   The arrow's northwest tip is the coordinate hotspot, not its center.
    Re-query current window bounds before choosing coordinates. The pointer follows window movement
    and stops if the window closes, minimizes, leaves the visible desktop, or its owner changes.
    It stays clipped to that window and hides while the target app is in the background or another window covers it.
@@ -136,7 +137,7 @@ export function createOpenUseServer(options: { allowInput?: boolean } = {}) {
     "window_cursor",
     {
       description:
-        "Position the circular model cursor inside the exact bound window. Window-local logical points from the whole window's top-left, including title bar. Follows its movement; rejects mismatched IDs, unavailable windows or out-of-bounds points. NO real click.",
+        "Position the model arrow's tip inside the exact bound window. Window-local logical points from the whole window's top-left, including title bar. Follows its movement; rejects mismatched IDs, unavailable windows or out-of-bounds points. NO real click.",
       inputSchema: fromJsonSchema<{ windowID: number; x: number; y: number; seconds?: number }>({
         type: "object",
         additionalProperties: false,
@@ -167,7 +168,7 @@ export function createOpenUseServer(options: { allowInput?: boolean } = {}) {
     "cursor",
     {
       description:
-        "Desktop-only circular visual cursor. Rejected while a window is bound: use window_cursor instead. NO real mouse movement or click. Display-local logical points from the top-left. Call displays first.",
+        "Desktop-only visual arrow cursor, with its tip at the requested coordinates. Rejected while a window is bound: use window_cursor instead. NO real mouse movement or click. Display-local logical points from the top-left. Call displays first.",
       inputSchema: fromJsonSchema<{ displayID: string; x: number; y: number; seconds?: number }>({
         type: "object",
         additionalProperties: false,
