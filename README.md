@@ -27,7 +27,7 @@ OpenCode-Lychee 在尽量保持 OpenCode v2 架构、会话引擎、插件系统
 | 荔枝主题          | 荔枝、晴空、汽水、青瓷、中国红、桂月主题均为独立内置主题，不覆盖上游主题                               |
 | macOS 语音输入    | 按住左 Command 录音，松开后用本地 whisper.cpp 转写                                                     |
 | 上游兼容          | 保留 OpenCode v2 CLI、后台服务、插件、模型与会话能力                                                   |
-| Open Use（macOS） | 圆形模型光标、指定窗口与控件观察；真实点击/输入须本地开启并逐次确认，详见 [使用说明](docs/open-use.md) |
+| Open Use（macOS） | 灰蓝色箭头光标、指定窗口与控件观察；真实点击/输入须本地开启并逐次确认，详见 [使用说明](docs/open-use.md) |
 
 ## 快速开始
 

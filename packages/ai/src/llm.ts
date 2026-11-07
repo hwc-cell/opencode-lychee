@@ -12,53 +12,53 @@ import {
   type TriggerCompactOptions,
 } from "./route/client.js"
 import {
-  GenerationOptions,
-  HttpOptions,
   InvalidProviderOutputError,
   InvalidRequestError,
+  mergeGeneration,
   AIError,
   LLMEvent,
   LLMResponse,
+  ResponseFold,
   Message,
   LanguageModel,
   SystemPart,
+  type BaseRequest,
   type CachePolicy,
   type CompactionCheckpointResponse,
   type CompactionResponse,
   type Finish,
   ToolChoice,
   ToolEntry,
-  type ContentPart,
+  Usage,
   type LanguageModelProviderOptions,
+  type GenerationOptionsFields,
   type LLMRequest,
   type ToolEntryInput,
   withPartial,
 } from "./schema/index.js"
 import { tool, type ExecutableTool, type Tool, type ToolSchema } from "./tool.js"
-import { ToolRuntime } from "./tool-runtime.js"
+import { runTools } from "./tool-runtime.js"
+import { addUsage, nextRequest, pendingCalls } from "./loop.js"
 
 /** Input accepted by `ai.request`, `ai.generate`, `ai.stream` and `ai.compact`. An `LLMRequest` is also a valid input. */
 export type LLMRequestInput<Model extends LanguageModel = LanguageModel> = TextRequestFields<Model> & PromptOrMessages
 
 /** Exactly one of `prompt`, a single user message, or `messages`, the full conversation. */
 export type PromptOrMessages =
-  | { readonly prompt: string | ContentPart | ReadonlyArray<ContentPart>; readonly messages?: never }
+  | { readonly prompt: Message.UserContentInput; readonly messages?: never }
   | { readonly messages: ReadonlyArray<Message | Message.Input>; readonly prompt?: never }
 
-interface TextRequestFields<Model extends LanguageModel> {
+interface TextRequestFields<Model extends LanguageModel>
+  extends BaseRequest<Model, NoInfer<LanguageModelProviderOptions<Model>>>,
+    GenerationOptionsFields {
   readonly id?: string
-  readonly model: Model
   readonly system?: string | SystemPart | ReadonlyArray<SystemPart>
   /** Sent in array order. Pass `tool(...)` values or wire entries such as hosted provider tools. */
   readonly tools?: ReadonlyArray<Tool | ToolEntryInput>
   readonly toolChoice?: ToolChoice.Input
-  readonly generation?: GenerationOptions.Input
-  readonly providerOptions?: NoInfer<LanguageModelProviderOptions<Model>>
-  readonly http?: HttpOptions.Input
   readonly cache?: CachePolicy
   /** Stable cache affinity for protocols that support provider-managed prompt caching. */
   readonly promptCacheKey?: string
-  readonly metadata?: Record<string, unknown>
   /** Emit a `raw` event with each provider frame before the events parsed from it. */
   readonly includeRaw?: boolean
 }
@@ -73,7 +73,7 @@ export type ObjectResponse<T> = LLMResponse & { readonly object: T }
 /** Stream events for a request with `schema`: the `finish` event carries the decoded `object`. */
 export type ObjectEvent<T> = Exclude<LLMEvent, Finish> | (Finish & { readonly object: T })
 
-/** Loop events for a request with `schema`: the final step's `finish` event carries the decoded `object`. */
+/** Loop events for a request with `schema`: the loop's `finish` event carries the decoded `object`. */
 export type LoopObjectEvent<T> = Exclude<LLMEvent, Finish> | (Finish & { readonly object?: T })
 
 /** Run one model call. With `schema`, the model must answer through a forced tool call decoded into `object`. */
@@ -99,7 +99,10 @@ export function generate(input: Input, options?: StreamOptions) {
   )
 }
 
-/** Stream one model call. With `schema`, the `finish` event carries the decoded `object`. */
+/**
+ * Stream one model call. The `finish` event carries the assistant `message` and `usage`; with `schema`, also the
+ * decoded `object`.
+ */
 export function stream<const Model extends LanguageModel, S extends OutputSchema>(
   input: LLMRequestInput<Model> & { readonly schema: S },
   options?: StreamOptions,
@@ -112,17 +115,9 @@ export function stream(input: Input, options?: StreamOptions) {
   return Stream.unwrap(
     prepare(input).pipe(
       Effect.map(({ request, output }) =>
-        Stream.suspend(() => {
-          let state = LLMResponse.empty()
-          return LLMClient.stream(request, options).pipe(
-            Stream.mapEffect((event) => {
-              state = LLMResponse.reduce(state, event)
-              return output === undefined || event.type !== "finish"
-                ? Effect.succeed(event)
-                : withObject(output, event, state)
-            }),
-          )
-        }),
+        stepStream(request, undefined, options, (step) =>
+          Stream.fromEffect(finishStep(step, step.response.usage, output)),
+        ),
       ),
     ),
   )
@@ -137,8 +132,10 @@ export type LLMLoopInput<Model extends LanguageModel = LanguageModel> = Omit<Tex
 
 /**
  * Stream model calls, running the model's tool calls between them, until a step has no client-executed tool calls,
- * reports a provider error, or `until` returns `true`. Each step's `step-start` and `step-finish` carry its step index.
- * With `schema`, the model ends by calling the hidden answer tool, decoded into `object` on that step's `finish`.
+ * hits the output token limit, or `until` returns `true`. Tool calls whose input is not valid JSON get an error result
+ * so the model can retry. A forced `toolChoice` applies to the first step only. Each step's `step-start` and `step-finish` carry its step index and usage; one `finish` ends
+ * the loop with the final step's reason and `message` and the usage summed across steps. With `schema`, the model ends
+ * by calling the hidden answer tool, decoded into `object` on the `finish`.
  */
 export function loop<const Model extends LanguageModel, S extends OutputSchema>(
   input: LLMLoopInput<Model> & { readonly schema: S },
@@ -150,68 +147,103 @@ export function loop<const Model extends LanguageModel>(
 ): Stream.Stream<LLMEvent, AIError, Service>
 export function loop(input: LLMLoopInput & { readonly schema?: OutputSchema }, options?: StreamOptions) {
   const { tools, until, ...rest } = input
-  // A step that calls the answer tool is final, even if it also called other tools.
-  const clientCalls = (response: LLMResponse, output: Tool | undefined) =>
-    output && response.toolCalls.some((call) => call.name === OBJECT_TOOL)
-      ? []
-      : response.toolCalls.filter((call) => call.providerExecuted !== true)
-  const step = (
-    request: LLMRequest,
-    steps: ReadonlyArray<LLMResponse>,
-    output: Tool | undefined,
-  ): Stream.Stream<LLMEvent, AIError, Service> =>
-    Stream.suspend(() => {
-      let state = LLMResponse.empty()
-      return LLMClient.stream(request, options).pipe(
-        Stream.map((event) =>
-          event.type === "step-start" || event.type === "step-finish" ? { ...event, index: steps.length } : event,
-        ),
-        Stream.mapEffect((event) => {
-          state = LLMResponse.reduce(state, event)
-          if (output === undefined || event.type !== "finish") return Effect.succeed(event)
-          const response = LLMResponse.complete(state)
-          return response && clientCalls(response, output).length > 0
-            ? Effect.succeed(event)
-            : withObject(output, event, state)
+  return Stream.unwrap(
+    prepare({ ...rest, tools }).pipe(
+      Effect.map(({ request, output }) => driveLoop({ tools, until, output, options }, request, [], undefined)),
+    ),
+  )
+}
+
+export { collect, type Collected, type CollectResult } from "./loop.js"
+
+interface Step {
+  readonly response: LLMResponse
+  readonly finish: Finish
+}
+
+/**
+ * Stream one model call. Its `finish` is held back: `after` gets the completed step and streams what follows it.
+ * With `index`, the step's `step-start` and `step-finish` carry it.
+ */
+const stepStream = (
+  request: LLMRequest,
+  index: number | undefined,
+  options: StreamOptions | undefined,
+  after: (step: Step) => Stream.Stream<LLMEvent, AIError, Service>,
+): Stream.Stream<LLMEvent, AIError, Service> =>
+  Stream.suspend(() => {
+    let state = ResponseFold.empty()
+    let finish: Finish | undefined
+    return LLMClient.stream(request, options).pipe(
+      Stream.map((event) =>
+        index !== undefined && (event.type === "step-start" || event.type === "step-finish")
+          ? { ...event, index }
+          : event,
+      ),
+      Stream.tap((event) =>
+        Effect.sync(() => {
+          state = ResponseFold.reduce(state, event)
+          if (event.type === "finish") finish = event
         }),
-        Stream.mapError((error) => withPartial(error, LLMResponse.partial(state))),
-        Stream.concat(
-          Stream.unwrap(
-            Effect.gen(function* () {
-              const response = LLMResponse.complete(state)
-              const calls = response ? clientCalls(response, output) : []
-              if (!response || calls.length === 0 || state.events.some(LLMEvent.is.providerError)) return Stream.empty
-              const done = [...steps, response]
-              if (until?.({ steps: done })) return Stream.empty
-              const results = yield* Effect.forEach(calls, (call) => ToolRuntime.dispatch(tools, call), {
-                concurrency: "unbounded",
-              })
-              const next = {
-                ...request,
-                messages: [
-                  ...request.messages,
-                  response.message,
-                  ...calls.map((call, i) =>
-                    Message.tool({
-                      id: call.id,
-                      name: call.name,
-                      namespace: call.namespace,
-                      result: results[i].result,
-                      providerMetadata: call.providerMetadata,
-                    }),
-                  ),
-                ],
-              }
-              return Stream.fromIterable(results.flatMap((result) => result.events)).pipe(
-                Stream.concat(step(next, done, output)),
-              )
-            }),
+      ),
+      Stream.filter((event) => event.type !== "finish"),
+      Stream.mapError((error) => withPartial(error, ResponseFold.partial(state))),
+      Stream.concat(
+        Stream.suspend(() => {
+          const response = ResponseFold.complete(state)
+          return response && finish ? after({ response, finish }) : Stream.empty
+        }),
+      ),
+    )
+  })
+
+/** The `finish` that ends a stream or loop: the final step's `message`, the given `usage`, and the decoded `object`. */
+const finishStep = (
+  step: Step,
+  usage: Usage | undefined,
+  output: Tool | undefined,
+): Effect.Effect<LLMEvent, AIError> => {
+  const event: Finish = { ...step.finish, usage, message: step.response.message }
+  if (output === undefined) return Effect.succeed(event)
+  return decodeObject(output, step.response).pipe(Effect.map((object) => ({ ...event, object })))
+}
+
+interface LoopContext {
+  readonly tools: ReadonlyArray<ExecutableTool>
+  readonly until: LLMLoopInput["until"]
+  readonly output: Tool | undefined
+  readonly options: StreamOptions | undefined
+}
+
+const driveLoop = (
+  context: LoopContext,
+  request: LLMRequest,
+  steps: ReadonlyArray<LLMResponse>,
+  usage: Usage | undefined,
+): Stream.Stream<LLMEvent, AIError, Service> =>
+  stepStream(request, steps.length, context.options, (step) => {
+    const total = addUsage(usage, step.response.usage)
+    const calls = pendingCalls(step.response, context.output && OBJECT_TOOL)
+    const done = [...steps, step.response]
+    if (calls.length === 0 || context.until?.({ steps: done }))
+      return Stream.fromEffect(finishStep(step, total, calls.length === 0 ? context.output : undefined))
+    return Stream.unwrap(
+      runTools(context.tools, calls).pipe(
+        Effect.map((results) =>
+          Stream.fromIterable(results.flatMap((result) => result.events)).pipe(
+            Stream.concat(
+              driveLoop(
+                context,
+                nextRequest(request, step.response, calls, results, context.output !== undefined),
+                done,
+                total,
+              ),
+            ),
           ),
         ),
-      )
-    })
-  return Stream.unwrap(prepare({ ...rest, tools }).pipe(Effect.map(({ request, output }) => step(request, [], output))))
-}
+      ),
+    )
+  })
 
 const OBJECT_TOOL = "generate_object"
 
@@ -256,13 +288,6 @@ const decodeObject = (output: Tool, response: LLMResponse) => {
   return Effect.fail(invalid(`model did not call the forced \`${OBJECT_TOOL}\` tool`))
 }
 
-const withObject = (output: Tool, event: Finish, state: LLMResponse.State): Effect.Effect<LLMEvent, AIError> => {
-  const response = LLMResponse.complete(state)
-  return response === undefined
-    ? Effect.succeed(event)
-    : decodeObject(output, response).pipe(Effect.map((object) => ({ ...event, object })))
-}
-
 /** Normalize text request input into a plain `LLMRequest`, with `prompt` turned into the one user message. */
 export const request = <const Model extends LanguageModel>(input: LLMRequestInput<Model>): LLMRequest<Model> => {
   if ((input.prompt === undefined) === (input.messages === undefined))
@@ -276,12 +301,14 @@ export const request = <const Model extends LanguageModel>(input: LLMRequestInpu
     messages: input.prompt === undefined ? (input.messages ?? []).map(Message.make) : [Message.user(input.prompt)],
     tools: input.tools?.map((item) => ("_definition" in item ? item._definition : ToolEntry.make(item))) ?? [],
     toolChoice: input.toolChoice ? ToolChoice.make(input.toolChoice) : undefined,
-    generation: input.generation === undefined ? undefined : GenerationOptions.make(input.generation),
+    ...mergeGeneration(input),
     providerOptions: input.providerOptions,
-    http: HttpOptions.make(input.http),
+    headers: input.headers,
+    fetch: input.fetch,
+    timeout: input.timeout,
+    http: input.http,
     cache: input.cache,
     promptCacheKey: input.promptCacheKey,
-    metadata: input.metadata,
     includeRaw: input.includeRaw,
   }
 }
