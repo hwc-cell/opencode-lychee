@@ -460,8 +460,10 @@ private extension CursorController {
         invalidateObservation()
         let token = UUID().uuidString
         var rows: [ObservedControl] = []
+        var truncated = false
         func visit(_ element: AXUIElement, parent: Int?, depth: Int) {
-            guard depth <= 12, rows.count < 160 else { return }
+            // Deeply nested application controls still fit within belongs()'s 32-parent validation.
+            guard depth <= 24, rows.count < 160 else { truncated = true; return }
             let index = rows.count
             let role = attribute(element, kAXRoleAttribute) as? String ?? "unknown"
             let secure = (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole
@@ -487,7 +489,7 @@ private extension CursorController {
         visit(window, parent: nil, depth: 0)
         observationID = token
         observedWindow = window
-        return WindowObservation(id: token, windowID: bound.id, elements: rows, truncated: rows.count >= 160)
+        return WindowObservation(id: token, windowID: bound.id, elements: rows, truncated: truncated)
     }
 
     func confirm(_ summary: String, window: WindowInfo, text: String? = nil) throws {

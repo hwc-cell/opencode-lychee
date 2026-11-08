@@ -162,8 +162,12 @@ export class NativeCursor {
 
   async request(input: CursorInput) {
     if (this.closed) throw new Error("Open Use 已停止，请重新连接 MCP。")
-    this.starting ??= this.start()
+    this.starting ??= this.start().catch((error) => {
+      this.close()
+      throw error
+    })
     await this.starting
+    if (this.closed) throw new Error("Open Use 已停止，请重新连接 MCP。")
     const id = ++this.sequence
     return new Promise<typeof reply.Type>((resolve, reject) => {
       // Native input and first window observation wait for a human's local confirmation, not a model-generated approval.

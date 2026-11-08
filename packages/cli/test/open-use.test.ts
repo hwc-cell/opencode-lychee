@@ -3,10 +3,52 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { symlink } from "node:fs/promises"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { isolatedEnv } from "./fixture/environment"
 import { createOpenUseServer } from "../src/open-use/server"
 import { prepareOpenUse } from "../src/open-use/host"
+
+test("native startup failure notifies disconnection and closes subsequent requests", async () => {
+  await using root = await tmpdir("open-use-missing-resources-")
+  await Bun.write(path.join(root.path, "native.ts"), Bun.file(path.join(import.meta.dir, "../src/open-use/native.ts")))
+  await symlink(
+    path.join(import.meta.dir, "../node_modules"),
+    path.join(root.path, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  )
+  const probe = path.join(root.path, "probe.ts")
+  await Bun.write(
+    probe,
+    `
+    import { NativeCursor } from "./native.ts"
+    const cursor = new NativeCursor()
+    let disconnected = false
+    cursor.stopped.then(() => disconnected = true)
+    let failed = false
+    try { await cursor.request({ action: "state" }) } catch { failed = true }
+    await Promise.resolve()
+    let secondClosed = false
+    try { await cursor.request({ action: "state" }) } catch (error) { secondClosed = String(error).includes("已停止") }
+    console.log(JSON.stringify({ failed, disconnected, secondClosed }))
+    cursor.close()
+  `,
+  )
+  const child = Bun.spawn([process.execPath, probe], {
+    cwd: root.path,
+    env: isolatedEnv(root.path),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [output, errors, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  expect(errors).toBe("")
+  expect(code).toBe(0)
+  expect(JSON.parse(output)).toEqual({ failed: true, disconnected: true, secondClosed: true })
+})
 
 test("Open Use teaches exact-window input boundaries and rejects unapproved or invalid requests before opening UI", async () => {
   const use = createOpenUseServer()
