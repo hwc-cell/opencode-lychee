@@ -28,6 +28,7 @@ model tool arguments cannot enable them. Check permissions for the current input
    Observations are bounded to 160 controls and 24 levels. truncated:true means the tree is partial;
    a missing control is not proof it does not exist. Never guess a control ID outside the returned observation.
    click/type_text require a fresh observationID, windowID and elementID from that exact observation.
+   If the control's label or role changed since observation, the action is rejected before human confirmation. Re-observe instead of reusing its old ID.
    A control's optional bounds are window-local points; you may use window_cursor to indicate its visible center first.
    Disabled controls (enabled:false) cannot be clicked or edited. Skip them; do not request confirmation for them.
    Each real action also needs a local native human confirmation. Never approve it through another tool.

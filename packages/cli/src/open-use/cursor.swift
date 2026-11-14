@@ -134,7 +134,7 @@ final class CursorController: NSObject {
     private let allowInput: Bool
     private var observationID: String?
     private var observedWindow: AXUIElement?
-    private var controls: [Int: AXUIElement] = [:]
+    private var controls: [Int: (element: AXUIElement, label: String, role: String)] = [:]
     private var confirming = false
     private var readApproved: UInt32?
     private var desktopOwner: pid_t?
@@ -475,8 +475,9 @@ private extension CursorController {
                 bounds = WindowBounds(x: point.x - bound.bounds.x, y: point.y - bound.bounds.y,
                                       width: dimensions.width, height: dimensions.height)
             } else { bounds = nil }
-            controls[index] = element
-            rows.append(ObservedControl(id: index, parent: parent, role: role, label: label(element),
+            let observedLabel = label(element)
+            controls[index] = (element, observedLabel, role)
+            rows.append(ObservedControl(id: index, parent: parent, role: role, label: observedLabel,
                                         text: role == kAXStaticTextRole && !secure
                                             ? (attribute(element, kAXValueAttribute) as? String).map { String($0.prefix(160)) } : nil,
                                         actions: names as? [String] ?? [],
@@ -528,8 +529,14 @@ private extension CursorController {
         let (bound, window) = try exactWindow(command.windowID)
         guard let token = command.observationID, token == observationID,
               let previous = observedWindow, CFEqual(previous, window),
-              let index = command.elementID, let element = controls[index], belongs(element, to: window) else {
+              let index = command.elementID, let control = controls[index], belongs(control.element, to: window) else {
             throw OpenUseError("控件观察已过期或不属于此窗口。请重新 observe_window，不能复用旧编号。")
+        }
+        let element = control.element
+        guard label(element) == control.label,
+              (attribute(element, kAXRoleAttribute) as? String ?? "unknown") == control.role else {
+            invalidateObservation()
+            throw OpenUseError("控件标签或类型已变化，未执行操作。请重新 observe_window，不能复用旧编号。")
         }
         if (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole {
             throw OpenUseError("安全输入框必须由用户手动填写。")
@@ -537,7 +544,7 @@ private extension CursorController {
         guard (attribute(element, kAXEnabledAttribute) as? Bool) != false else {
             throw OpenUseError("此控件已禁用，未执行操作。请等待控件可用后重新观察。")
         }
-        let originalLabel = label(element)
+        let originalLabel = control.label
         if command.action == "click" {
             var actions: CFArray?
             AXUIElementCopyActionNames(element, &actions)
@@ -553,7 +560,9 @@ private extension CursorController {
         try confirm(command.action == "click" ? "点击控件：\(originalLabel)" : "向控件 \(index)（\(originalLabel)）的当前选区插入下方文字（不发送回车键）。", window: bound,
                     text: command.action == "type_text" ? command.text : nil)
         let (_, current) = try exactWindow(command.windowID)
-        guard observationID == token, CFEqual(current, window), belongs(element, to: current), label(element) == originalLabel else {
+        guard observationID == token, CFEqual(current, window), belongs(element, to: current), label(element) == originalLabel,
+              (attribute(element, kAXRoleAttribute) as? String ?? "unknown") == control.role else {
+            if observationID == token { invalidateObservation() }
             throw OpenUseError("确认期间窗口或控件发生变化，未执行操作，请重新观察。")
         }
         guard (attribute(element, kAXSubroleAttribute) as? String) != kAXSecureTextFieldSubrole else {
