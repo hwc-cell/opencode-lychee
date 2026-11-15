@@ -35,6 +35,8 @@
 
 ## 连续消息与权限确认
 
+- 处理消息期间每 5 秒续一次“正在输入”，完成、出错或停止后取消续期并清除状态；提示请求总超时 1.5 秒，网络异常不会拖住消息队列。
+- 所有回复（含模型列表、帮助、工具权限通知）统一按微信 2000 字符预算分段，段号也计入预算；保留段落和 emoji，不丢字。发送失败只重试当前分段。
 - 默认连续消息逐条排队；`/busy interrupt` 恢复收到新消息时打断的行为，`/busy queue` 切回排队。策略按对话保存，重启仍保留。
 - `/stop` 同时停止当前任务和取消尚未递交的排队消息；会话内容继续保留，下一条新消息仍可正常处理。
 - 工具等待权限确认时，扫码账号在私聊中会收到操作、对象和完整请求编号。使用 `/approve <编号>` 仅允许本次；`/deny <编号>` 拒绝。过期或其他会话的请求不能批准。
@@ -79,6 +81,7 @@ await enqueue(userKey, () => deliverMessage({ sdk, sessionID, text, files, reply
 
 ## 设计点
 
+- 输入状态的持续刷新、短超时与取消清理参考 [Hermes 官方平台基类](https://github.com/NousResearch/hermes-agent/blob/main/gateway/platforms/base.py) 的 `_keep_typing` / `_stop_typing_refresh`；复用现有微信接口，不新增平台协议。
 - `handleChatCommand` 返回 `true` 表示指令已消费, 适配器不要再把该文本发给 AI。
 - owner 检查在核心内完成, 非 owner 收到 🔒 提示并记录日志。
 - `deliverMessage` 使用 Server v2 API(`/api/session/{id}/prompt|wait|interrupt|message`):

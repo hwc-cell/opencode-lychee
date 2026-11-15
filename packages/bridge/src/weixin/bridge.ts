@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto"
 import { stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
-import { chunkText, getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
+import { getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
+import { keepTyping } from "../activity"
+import { sendChunked } from "../text"
 import { conversationKey, messageKey, promptID } from "./keys"
 import { messagePrompt } from "./media"
 import { readState, updateState } from "./state"
@@ -362,37 +364,38 @@ async function handleMessage(args: {
 
   // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
   const ctxToken = msg.context_token!
-  const reply = async (replyText: string) => {
-    const clientId = `lychee-weixin:${Date.now()}-${randomUUID()}`
-    for (let i = 0; i < 2; i++) {
-      try {
-        await sendText({
-          token,
-          baseUrl,
-          toUserId: msg.from_user_id!,
-          contextToken: ctxToken,
-          text: replyText,
-          clientId,
-        })
+  const reply = (replyText: string) =>
+    sendChunked(replyText, async (chunk) => {
+      const clientId = `lychee-weixin:${Date.now()}-${randomUUID()}`
+      for (let i = 0; i < 2; i++) {
         try {
-          updateState((next) => {
-            if (next.health) {
-              next.health.updatedAt = new Date().toISOString()
-              next.health.lastOutboundAt = next.health.updatedAt
-            }
+          await sendText({
+            token,
+            baseUrl,
+            toUserId: msg.from_user_id!,
+            contextToken: ctxToken,
+            text: chunk,
+            clientId,
           })
+          try {
+            updateState((next) => {
+              if (next.health) {
+                next.health.updatedAt = new Date().toISOString()
+                next.health.lastOutboundAt = next.health.updatedAt
+              }
+            })
+          } catch (error) {
+            // 消息已经成功发出，健康状态落盘失败不能触发重发。
+            opts.log(`发送成功但状态保存失败: ${error instanceof Error ? error.message : error}`)
+          }
+          return
         } catch (error) {
-          // 消息已经成功发出，健康状态落盘失败不能触发重发。
-          opts.log(`发送成功但状态保存失败: ${error instanceof Error ? error.message : error}`)
+          opts.log(`发送失败(第${i + 1}次): ${error instanceof Error ? error.message : error}`)
+          if (i === 1) throw error
+          await sleep(500)
         }
-        return
-      } catch (error) {
-        opts.log(`发送失败(第${i + 1}次): ${error instanceof Error ? error.message : error}`)
-        if (i === 1) throw error
-        await sleep(500)
       }
-    }
-  }
+    })
 
   if (
     text &&
@@ -555,7 +558,9 @@ async function handleMessage(args: {
     }
     if (ready.created) await reply(t("created"))
     if (cancelled()) return
-    const typing = sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 1 })
+    const stopTyping = keepTyping((status, signal) =>
+      sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status, signal }),
+    )
     const announced = new Set<string>()
     try {
       await deliverMessage({
@@ -570,18 +575,11 @@ async function handleMessage(args: {
           msg.from_user_id === ownerUserId && !msg.group_id
             ? () => notifyPermissions({ client: args.client, sessionID, announced, reply })
             : undefined,
-        reply: async (replyText) => {
-          const chunks = chunkText(replyText, 1990)
-          for (let i = 0; i < chunks.length; i++) {
-            const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length}) ` : ""
-            await reply(prefix + chunks[i])
-          }
-        },
+        reply,
         log: (m) => opts.log(m),
       })
     } finally {
-      await typing
-      await sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status: 2 })
+      await stopTyping()
     }
   })
 }

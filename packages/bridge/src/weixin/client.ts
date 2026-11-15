@@ -1,5 +1,6 @@
 // 微信 iLink Bot API 客户端
 import { randomBytes } from "node:crypto"
+export { chunkText } from "../text"
 
 const DEFAULT_BASE = "https://ilinkai.weixin.qq.com"
 const API_TIMEOUT_MS = 30_000
@@ -275,31 +276,17 @@ export async function sendText(opts: {
   if (json.ret !== undefined && json.ret !== 0) throw new Error(`发送失败: ret=${json.ret}`)
 }
 
-/** 按 2000 字保守上限分片(优先 \n\n, \n, 空格) */
-export function chunkText(text: string, limit = 2000): string[] {
-  if (text.length <= limit) return [text]
-  const chunks: string[] = []
-  let rest = text
-  while (rest.length > limit) {
-    let cut = rest.lastIndexOf("\n\n", limit)
-    if (cut <= 0) cut = rest.lastIndexOf("\n", limit)
-    if (cut <= 0) cut = rest.lastIndexOf(" ", limit)
-    if (cut <= 0) cut = limit
-    if ((rest.charCodeAt(cut - 1) & 0xfc00) === 0xd800) cut -= 1
-    chunks.push(rest.slice(0, cut))
-    rest = rest.slice(cut)
-  }
-  chunks.push(rest)
-  return chunks
-}
-
 export async function sendTyping(opts: {
   token: string
   baseUrl: string
   userId: string
   contextToken?: string
   status: 1 | 2
+  signal?: AbortSignal
 }): Promise<void> {
+  // Activity is best effort: one slow getconfig must not hold the conversation queue.
+  const timeout = AbortSignal.timeout(1500)
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout
   const cfg = await fetch(`${opts.baseUrl}/ilink/bot/getconfig`, {
     method: "POST",
     headers: baseHeaders(opts.token),
@@ -308,11 +295,11 @@ export async function sendTyping(opts: {
       context_token: opts.contextToken,
       base_info: baseInfo(),
     }),
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    signal,
   }).catch(() => undefined)
   if (!cfg?.ok) return
   const cfgJson = (await cfg.json().catch(() => undefined)) as { typing_ticket?: string } | undefined
-  if (!cfgJson?.typing_ticket) return
+  if (!cfgJson?.typing_ticket || signal.aborted) return
   await fetch(`${opts.baseUrl}/ilink/bot/sendtyping`, {
     method: "POST",
     headers: baseHeaders(opts.token),
@@ -322,6 +309,6 @@ export async function sendTyping(opts: {
       status: opts.status,
       base_info: baseInfo(),
     }),
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    signal,
   }).catch(() => undefined)
 }
