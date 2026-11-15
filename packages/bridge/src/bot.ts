@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { t } from "./i18n"
+import { turnReceipt, type ReceiptMessage, type TurnReceipt } from "./receipt"
 
 // 通道无关的聊天代理核心: 处理"发消息给 AI -> 等待 -> 回复"全过程。
 // 微信/Slack/Telegram/飞书 适配器共用, 自动获得:
@@ -71,6 +72,7 @@ export type DeliverArgs = {
   log: (msg: string) => void
   poll?: () => Promise<void>
   cancelled?: () => boolean
+  receipt?: (receipt: TurnReceipt) => Promise<void>
 }
 
 // 每次尝试的最长等待(看门狗), 超时视为模型超时; 可用 LYCHEE_MODEL_TIMEOUT_MS 覆盖
@@ -99,16 +101,36 @@ type RunState = {
 const runState = new Map<string, RunState>()
 const queues = new Map<string, Promise<void>>()
 const queueVersions = new Map<string, number>()
+const queueEntries = new Map<string, Array<{ id: string; text: string; running: boolean; cancelled: boolean }>>()
 
 // 每个 key 串行执行任务; 已在队列中时新任务会排在旧任务之后
-export function enqueue<T>(key: string, task: (cancelled: () => boolean) => Promise<T>): Promise<T | undefined> {
+export function enqueue<T>(
+  key: string,
+  task: (cancelled: () => boolean) => Promise<T>,
+  metadata?: { id?: string; text?: string },
+): Promise<T | undefined> {
   const prev = queues.get(key) ?? Promise.resolve()
   const version = queueVersions.get(key) ?? 0
+  const entries = queueEntries.get(key) ?? []
+  const entry = {
+    id: metadata?.id ?? randomUUID().slice(0, 8),
+    text: metadata?.text ?? "",
+    running: false,
+    cancelled: false,
+  }
+  entries.push(entry)
+  queueEntries.set(key, entries)
   const run = prev
     .catch(() => {})
-    .then(() => {
-      if ((queueVersions.get(key) ?? 0) !== version) return
-      return task(() => (queueVersions.get(key) ?? 0) !== version)
+    .then(async () => {
+      if (entry.cancelled || (queueVersions.get(key) ?? 0) !== version) return
+      entry.running = true
+      return task(() => entry.cancelled || (queueVersions.get(key) ?? 0) !== version)
+    })
+    .finally(() => {
+      const remaining = (queueEntries.get(key) ?? []).filter((item) => item !== entry)
+      if (remaining.length) queueEntries.set(key, remaining)
+      else queueEntries.delete(key)
     })
   const tail = run.then(
     () => undefined,
@@ -124,12 +146,28 @@ export function enqueue<T>(key: string, task: (cancelled: () => boolean) => Prom
   return run
 }
 
+export function queuedTasks(key: string) {
+  return (queueEntries.get(key) ?? [])
+    .filter((entry) => !entry.cancelled)
+    .map(({ id, text, running }) => ({ id, text, running }))
+}
+
+export function cancelQueuedTask(key: string, id: string) {
+  const entry = queueEntries.get(key)?.find((entry) => entry.id === id && !entry.running && !entry.cancelled)
+  if (!entry) return false
+  entry.cancelled = true
+  return true
+}
+
 export function isQueued(key: string): boolean {
   return queues.has(key)
 }
 
 export function cancelQueued(key: string): boolean {
   if (!isQueued(key)) return false
+  for (const entry of queueEntries.get(key) ?? []) {
+    if (!entry.running) entry.cancelled = true
+  }
   queueVersions.set(key, (queueVersions.get(key) ?? 0) + 1)
   return true
 }
@@ -160,11 +198,11 @@ export async function interruptAll(sdk: BotSdk): Promise<void> {
   await Promise.all(active.map(([sessionID]) => safeInterrupt(sdk.v2.session, sessionID)))
 }
 
-type AssistantMessage = {
+type AssistantMessage = ReceiptMessage & {
   id?: string
   type?: string
   error?: { name?: string; type?: string }
-  content?: Array<{ type?: string; text?: string; name?: string; state?: { status?: string } }>
+  content?: Array<NonNullable<ReceiptMessage["content"]>[number] & { text?: string }>
 }
 
 function rowsOf(res: unknown): AssistantMessage[] {
@@ -201,6 +239,7 @@ export async function readTurnResponse(v2: V2Session, sessionID: string, promptI
         text: assistants.map(assistantText).filter(Boolean).join("\n\n"),
         error: latest?.error,
         tool,
+        receipt: (durationMs: number) => turnReceipt(assistants, durationMs),
       }
     }
     // SAFETY: BotSdk's adapter preserves the generated message-list cursor envelope.
@@ -376,6 +415,7 @@ export async function interruptCurrent(args: {
 
 export async function deliverMessage(args: DeliverArgs): Promise<void> {
   if (args.cancelled?.()) return
+  const startedAt = Date.now()
   const { sdk, sessionID, text, reply, log } = args
   const notify = args.notify ?? reply
   const stream = args.stream ?? reply
@@ -453,17 +493,25 @@ export async function deliverMessage(args: DeliverArgs): Promise<void> {
     const response = await readReply(v2, sessionID, promptID, log)
     if (state.abortedByUser || args.cancelled?.()) return
     if (response && !response.error) {
+      const report = async () => {
+        if (state.abortedByUser || args.cancelled?.()) return
+        await args
+          .receipt?.(response.receipt!(Date.now() - startedAt))
+          .catch((error) => log(`回执发送失败: ${error instanceof Error ? error.message : String(error)}`))
+      }
       const finalText = response.text
       if (finalText) {
         if (state.rewritten || !finalText.startsWith(state.streamed)) {
           state.pending = ""
           await reply(t("replyRevised") + "\n\n" + finalText)
+          await report()
           return
         }
         await flushPending(state, stream, log)
         const remaining = finalText.slice(state.streamed.length)
         if (remaining) await reply(remaining)
         log(`✅ 已回复 (${finalText.length} 字, 流式 ${Math.min(state.streamed.length, finalText.length)} 字)`)
+        await report()
         return
       }
       await reply(t("noReply"))

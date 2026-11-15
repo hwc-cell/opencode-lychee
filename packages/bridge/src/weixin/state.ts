@@ -27,6 +27,11 @@ export type WeixinState = {
   contexts?: Record<string, string>
   // 上次使用的 AI 工作目录
   workDir?: string
+  // 每个聊天独立保存项目目录与已建立的会话；sessions 保留为当前会话兼容映射。
+  conversations?: Record<
+    string,
+    { directory: string; projects: Record<string, { sessionID?: string; sessions: string[] }> }
+  >
   // (accountId#userId) -> 用户选择的模型(微信 /model 切换)
   models?: Record<string, { id: string; providerID: string; variant?: string }>
   // 默认模型(OpenCode-Lychee weixin configure 配置; 未配置时微信发消息会被引导配置)

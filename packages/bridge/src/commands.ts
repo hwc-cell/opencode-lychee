@@ -21,6 +21,12 @@ export const CHAT_COMMANDS = [
   "/permissions",
   "/approve",
   "/deny",
+  "/questions",
+  "/answer",
+  "/reject-question",
+  "/queue",
+  "/projects",
+  "/sessions",
 ]
 
 export type ChatCommandStatus = {
@@ -36,6 +42,9 @@ export type ChatCommandControls = {
   stop: () => Promise<boolean>
   status: () => Promise<ChatCommandStatus>
   directory: (next?: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
+  projects?: () => Promise<Array<{ directory: string; active: boolean }>>
+  sessions?: () => Promise<Array<{ id: string; active: boolean }>>
+  switchSession?: (id: string) => Promise<boolean>
 }
 
 export async function handleChatCommand(args: {
@@ -53,10 +62,93 @@ export async function handleChatCommand(args: {
   }
   controls?: ChatCommandControls
   busyMode?: (next?: "queue" | "interrupt") => Promise<"queue" | "interrupt">
+  queue?: {
+    list: () => Array<{ id: string; text: string; running: boolean }>
+    cancel: (id: string) => boolean
+  }
 }): Promise<boolean> {
   const text = args.text.trim()
   const command = text.toLowerCase()
   const isOwner = args.fromUserId === args.ownerUserId
+
+  if (command === "/queue" || command.startsWith("/queue ")) {
+    if (!args.queue) return false
+    const parts = text.split(/\s+/)
+    if (parts.length === 1) {
+      const tasks = args.queue.list()
+      await args.reply(
+        tasks.length
+          ? t("queueList", {
+              tasks: tasks
+                .map((task) => `${task.running ? "▶" : "·"} ${task.id} ${task.text || t("queueAttachment")}`)
+                .join("\n"),
+            })
+          : t("queueEmpty"),
+      )
+      return true
+    }
+    if (parts.length !== 3 || parts[1].toLowerCase() !== "cancel") {
+      await args.reply(t("queueUsage"))
+      return true
+    }
+    await args.reply(t(args.queue.cancel(parts[2]) ? "queueCancelled" : "queueNotFound"))
+    return true
+  }
+
+  if (command === "/projects" || command.startsWith("/projects ")) {
+    if (!args.controls?.projects) return false
+    const projects = await args.controls.projects()
+    const selected = text.slice("/projects".length).trim()
+    if (!selected) {
+      await args.reply(
+        t("projectList", {
+          projects: projects
+            .map((project, index) => `${project.active ? "▶" : "·"} ${index + 1}. ${project.directory}`)
+            .join("\n"),
+        }),
+      )
+      return true
+    }
+    if (!isOwner) {
+      await args.reply(t("cmdOwnerOnly"))
+      return true
+    }
+    const index = /^\d+$/.test(selected) ? Number(selected) - 1 : -1
+    const project = projects[index]
+    if (!project) {
+      await args.reply(t("projectUsage"))
+      return true
+    }
+    const result = await args.controls.directory(project.directory)
+    await args.reply(
+      result.ok
+        ? t(result.changed ? "cmdDirectoryChanged" : "cmdDirectoryCurrent", { directory: result.directory })
+        : t("cmdDirectoryFailed", { error: result.error ?? t("cmdDirectoryUnknownError") }),
+    )
+    return true
+  }
+
+  if (command === "/sessions" || command.startsWith("/sessions ")) {
+    if (!args.controls?.sessions || !args.controls.switchSession) return false
+    const selected = text.slice("/sessions".length).trim()
+    const sessions = await args.controls.sessions()
+    if (!selected) {
+      await args.reply(
+        sessions.length
+          ? t("sessionList", {
+              sessions: sessions.map((session) => `${session.active ? "▶" : "·"} ${session.id}`).join("\n"),
+            })
+          : t("sessionListEmpty"),
+      )
+      return true
+    }
+    if (!sessions.some((session) => session.id === selected)) {
+      await args.reply(t("sessionUnknown"))
+      return true
+    }
+    await args.reply(t((await args.controls.switchSession(selected)) ? "sessionSwitched" : "sessionSwitchFailed"))
+    return true
+  }
 
   if (command === "/busy" || command.startsWith("/busy ")) {
     if (!args.busyMode) return false

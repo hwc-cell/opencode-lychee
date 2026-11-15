@@ -7,8 +7,18 @@ import { getUpdates, messageText, sendText, sendTyping, type WeixinMessage } fro
 import { keepTyping } from "../activity"
 import { sendChunked } from "../text"
 import { conversationKey, messageKey, promptID } from "./keys"
+import { queuedMessageID, discardQueuedMessages } from "./inbox"
 import { messagePrompt } from "./media"
 import { readState, updateState } from "./state"
+import {
+  currentDirectory,
+  rememberSession,
+  clearCurrentSession,
+  switchProject,
+  listProjects,
+  listSessions,
+  switchSession,
+} from "./conversations"
 import { handleChatCommand } from "../commands"
 import {
   deliverMessage,
@@ -18,12 +28,16 @@ import {
   interruptCurrent,
   isQueued,
   isSessionRunning,
+  queuedTasks,
+  cancelQueuedTask,
   type BotSdk,
   type BridgeModelInfo,
   type BridgeModelRef,
 } from "../bot"
 import { t } from "../i18n"
 import { handlePermissionCommand, notifyPermissions } from "../permissions"
+import { handleQuestionCommand, notifyQuestions } from "../questions"
+import { formatReceipt } from "../receipt"
 
 export type BridgeOptions = {
   serverUrl: string
@@ -114,30 +128,32 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const pending = new Map<string, Promise<Session | undefined>>()
   const checked = new Set<string>()
   const generations = new Map<string, number>()
-  const currentDirectory = () => readState().workDir ?? opts.dir
-  const forgetSession = (key: string) => {
+  const directoryFor = (key: string) => currentDirectory(readState(), key, opts.dir)
+  const invalidate = (key: string) => {
     const stored = readState().sessions?.[key]
+    const waiting = queuedTasks(key)
+      .filter((task) => !task.running)
+      .map((task) => task.id)
     generations.set(key, (generations.get(key) ?? 0) + 1)
     pending.delete(key)
     if (stored) checked.delete(stored)
+    cancelQueued(key)
     updateState((next) => {
-      if (next.sessions?.[key]) delete next.sessions[key]
+      if (next.credential?.token !== cred.token) return
+      discardQueuedMessages(next, cred.accountId, key, waiting)
     })
     return stored
   }
-  const forgetAllSessions = () => {
-    const keys = new Set([...Object.keys(readState().sessions ?? {}), ...pending.keys()])
-    for (const key of keys) {
-      generations.set(key, (generations.get(key) ?? 0) + 1)
-      cancelQueued(key)
-    }
-    pending.clear()
-    checked.clear()
+  const forgetSession = (key: string) => {
+    const stored = invalidate(key)
     updateState((next) => {
-      next.sessions = {}
+      if (next.credential?.token !== cred.token) return
+      clearCurrentSession(next, key, opts.dir)
     })
+    return stored
   }
-  const switchDirectory = async (raw: string) => {
+  const switchDirectory = async (key: string, raw: string) => {
+    const generation = generations.get(key) ?? 0
     const input = raw.trim()
     const unquoted =
       input.length >= 2 &&
@@ -146,16 +162,25 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
         : input
     const expanded =
       unquoted === "~" ? homedir() : unquoted.startsWith("~/") ? path.join(homedir(), unquoted.slice(2)) : unquoted
-    const directory = path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(currentDirectory(), expanded)
+    const directory = path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(directoryFor(key), expanded)
     const info = await stat(directory).catch(() => undefined)
-    if (!info) return { ok: false, directory: currentDirectory(), error: t("cmdDirectoryNotFound") }
-    if (!info.isDirectory()) return { ok: false, directory: currentDirectory(), error: t("cmdDirectoryNotDirectory") }
-    if (directory === currentDirectory()) return { ok: true, directory, changed: false }
-    await interruptAll(sdk)
-    forgetAllSessions()
+    if ((generations.get(key) ?? 0) !== generation) return { ok: true, directory: directoryFor(key), changed: false }
+    if (!info) return { ok: false, directory: directoryFor(key), error: t("cmdDirectoryNotFound") }
+    if (!info.isDirectory()) return { ok: false, directory: directoryFor(key), error: t("cmdDirectoryNotDirectory") }
+    if (directory === directoryFor(key)) return { ok: true, directory, changed: false }
+    const previous = invalidate(key)
     updateState((next) => {
-      next.workDir = directory
+      if (next.credential?.token !== cred.token) return
+      switchProject(next, key, opts.dir, directory)
     })
+    if (previous)
+      await interruptCurrent({
+        sdk,
+        sessionID: previous,
+        reply: async () => {},
+        log: (m) => opts.log(m),
+        notify: false,
+      })
     opts.log(`AI 工作目录已切换: ${directory}`)
     return { ok: true, directory, changed: true }
   }
@@ -171,17 +196,22 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
           await sdk.v2.session.messages({ sessionID: stored, limit: 1, order: "desc" }, { throwOnError: true })
           if ((generations.get(key) ?? 0) !== generation) return undefined
           checked.add(stored)
+          updateState((next) => {
+            if (next.credential?.token !== cred.token) return
+            rememberSession(next, key, opts.dir, stored)
+          })
           return { id: stored, created: false }
         } catch (error) {
           if (statusCode(error) !== 404) throw error
         }
+        if ((generations.get(key) ?? 0) !== generation) return undefined
         updateState((next) => {
-          if (next.sessions?.[key] === stored) delete next.sessions[key]
+          if (next.sessions?.[key] === stored) clearCurrentSession(next, key, opts.dir)
         })
         opts.log(`旧会话已失效, 正在为 ${key} 自动重建`)
       }
       const res = (await sdk.v2.session.create(
-        { location: { directory: currentDirectory() }, model },
+        { location: { directory: directoryFor(key) }, model },
         { throwOnError: true },
       )) as {
         data?: { data?: { id?: string } }
@@ -192,8 +222,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       checked.add(id)
       updateState((next) => {
         if (next.credential?.token !== cred.token) return
-        next.sessions = next.sessions ?? {}
-        next.sessions[key] = id
+        rememberSession(next, key, opts.dir, id)
       })
       return { id, created: true }
     })().catch((error) => {
@@ -238,8 +267,40 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       msg,
       session,
       forgetSession,
-      currentDirectory,
-      switchDirectory,
+      currentDirectory: () => directoryFor(conversationKey(cred.accountId, msg)),
+      switchDirectory: (raw) => switchDirectory(conversationKey(cred.accountId, msg), raw),
+      projects: () => listProjects(readState(), conversationKey(cred.accountId, msg), opts.dir),
+      sessions: () =>
+        listSessions(readState(), conversationKey(cred.accountId, msg), opts.dir).map((session) => ({
+          id: session.id,
+          active: session.current,
+        })),
+      switchSession: async (id) => {
+        const userKey = conversationKey(cred.accountId, msg)
+        if (!listSessions(readState(), userKey, opts.dir).some((session) => session.id === id)) return false
+        const generation = generations.get(userKey) ?? 0
+        try {
+          await sdk.v2.session.messages({ sessionID: id, limit: 1, order: "desc" }, { throwOnError: true })
+        } catch {
+          return false
+        }
+        if ((generations.get(userKey) ?? 0) !== generation) return false
+        if (readState().sessions?.[userKey] === id) return true
+        const previous = invalidate(userKey)
+        updateState((next) => {
+          if (next.credential?.token !== cred.token) return
+          switchSession(next, userKey, opts.dir, id)
+        })
+        if (previous && previous !== id)
+          await interruptCurrent({
+            sdk,
+            sessionID: previous,
+            reply: async () => {},
+            log: (m) => opts.log(m),
+            notify: false,
+          })
+        return true
+      },
     })
       .then(() => {
         completed.add(key)
@@ -335,7 +396,17 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
     for (const [key, msg] of Object.entries(readState().inbox ?? {})) schedule(key, msg)
   }
   await interruptAll(sdk)
-  await Promise.race([Promise.allSettled([...handlers]), sleep(10_000)])
+  let drainTimer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      Promise.allSettled([...handlers]),
+      new Promise<void>((resolve) => {
+        drainTimer = setTimeout(resolve, 10_000)
+      }),
+    ])
+  } finally {
+    clearTimeout(drainTimer)
+  }
   process.off("SIGINT", stop)
   process.off("SIGTERM", stop)
   const last = readState().health
@@ -356,11 +427,26 @@ async function handleMessage(args: {
   forgetSession: (key: string) => string | undefined
   currentDirectory: () => string
   switchDirectory: (raw: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
+  projects: () => Array<{ directory: string; active: boolean }>
+  sessions: () => Array<{ id: string; active: boolean }>
+  switchSession: (id: string) => Promise<boolean>
 }) {
   const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, session } = args
   const userKey = conversationKey(accountId, msg)
   const state = readState()
   const text = messageText(msg)
+  const cancelWaiting = (id?: string) => {
+    const waiting = queuedTasks(userKey)
+      .filter((task) => !task.running && (!id || task.id === id))
+      .map((task) => task.id)
+    const cancelled = id ? cancelQueuedTask(userKey, id) : cancelQueued(userKey)
+    if (cancelled)
+      updateState((next) => {
+        if (next.credential?.token !== token) return
+        discardQueuedMessages(next, accountId, userKey, waiting)
+      })
+    return cancelled
+  }
 
   // 入站 context_token 是当前对话的回复路由锚点; getconfig 只返回 typing_ticket, 不会刷新它。
   const ctxToken = msg.context_token!
@@ -410,6 +496,18 @@ async function handleMessage(args: {
   )
     return
 
+  if (
+    text &&
+    (await handleQuestionCommand({
+      client: args.client,
+      sessionID: state.sessions?.[userKey],
+      text,
+      owner: msg.from_user_id === ownerUserId && !msg.group_id,
+      reply,
+    }))
+  )
+    return
+
   // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
   state.models = state.models ?? {}
   const [defaultProvider, defaultID] = (process.env.LYCHEE_MODEL ?? "opencode/muse-spark-1.3-contributor-free").split(
@@ -438,6 +536,7 @@ async function handleMessage(args: {
           })
         return readState().busyModes?.[userKey] ?? "queue"
       },
+      queue: { list: () => queuedTasks(userKey), cancel: (id) => cancelWaiting(id) },
       models: {
         list: async () => {
           const res = (await sdk.v2.model.list(
@@ -482,7 +581,7 @@ async function handleMessage(args: {
         },
         stop: async () => {
           const current = readState().sessions?.[userKey]
-          const cancelled = cancelQueued(userKey)
+          const cancelled = cancelWaiting()
           if (!current) return cancelled
           const stopped = await interruptCurrent({
             sdk,
@@ -505,6 +604,9 @@ async function handleMessage(args: {
         },
         directory: async (next) =>
           next ? args.switchDirectory(next) : { ok: true, directory: args.currentDirectory() },
+        projects: async () => args.projects(),
+        sessions: async () => args.sessions(),
+        switchSession: args.switchSession,
       },
     }))
   ) {
@@ -536,50 +638,60 @@ async function handleMessage(args: {
   }
 
   // 同一用户串行处理: 新消息在旧任务结束后执行
-  await enqueue(userKey, async (cancelled) => {
-    await queuedNotice
-    if (readState().sessions?.[userKey] !== sessionID) {
-      opts.log(`会话已切换, 跳过旧队列消息 (${sessionID})`)
-      return
-    }
-    // Download attachments inside the conversation queue so a slower image cannot
-    // be overtaken by a later text message, and /stop can cancel pending work.
-    let prompt
-    try {
-      prompt = await messagePrompt(msg)
-    } catch (error) {
-      if (!cancelled()) await reply(t("mediaFailed", { error: error instanceof Error ? error.message : String(error) }))
-      return
-    }
-    if (cancelled()) return
-    if (!prompt.text && !prompt.files.length) {
-      await reply(t("unsupported"))
-      return
-    }
-    if (ready.created) await reply(t("created"))
-    if (cancelled()) return
-    const stopTyping = keepTyping((status, signal) =>
-      sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status, signal }),
-    )
-    const announced = new Set<string>()
-    try {
-      await deliverMessage({
-        sdk,
-        sessionID,
-        text: prompt.text,
-        files: prompt.files,
-        promptID: promptID(accountId, msg),
-        model,
-        cancelled,
-        poll:
-          msg.from_user_id === ownerUserId && !msg.group_id
-            ? () => notifyPermissions({ client: args.client, sessionID, announced, reply })
-            : undefined,
-        reply,
-        log: (m) => opts.log(m),
-      })
-    } finally {
-      await stopTyping()
-    }
-  })
+  await enqueue(
+    userKey,
+    async (cancelled) => {
+      await queuedNotice
+      if (readState().sessions?.[userKey] !== sessionID) {
+        opts.log(`会话已切换, 跳过旧队列消息 (${sessionID})`)
+        return
+      }
+      // Download attachments inside the conversation queue so a slower image cannot
+      // be overtaken by a later text message, and /stop can cancel pending work.
+      let prompt
+      try {
+        prompt = await messagePrompt(msg)
+      } catch (error) {
+        if (!cancelled())
+          await reply(t("mediaFailed", { error: error instanceof Error ? error.message : String(error) }))
+        return
+      }
+      if (cancelled()) return
+      if (!prompt.text && !prompt.files.length) {
+        await reply(t("unsupported"))
+        return
+      }
+      if (ready.created) await reply(t("created"))
+      if (cancelled()) return
+      const stopTyping = keepTyping((status, signal) =>
+        sendTyping({ token, baseUrl, userId: msg.from_user_id!, contextToken: msg.context_token, status, signal }),
+      )
+      const announced = new Set<string>()
+      const questions = new Set<string>()
+      try {
+        await deliverMessage({
+          sdk,
+          sessionID,
+          text: prompt.text,
+          files: prompt.files,
+          promptID: promptID(accountId, msg),
+          model,
+          cancelled,
+          poll:
+            msg.from_user_id === ownerUserId && !msg.group_id
+              ? async () => {
+                  await notifyPermissions({ client: args.client, sessionID, announced, reply })
+                  await notifyQuestions({ client: args.client, sessionID, announced: questions, reply })
+                }
+              : undefined,
+          reply,
+          receipt: (receipt) => reply(formatReceipt(receipt)),
+          log: (m) => opts.log(m),
+        })
+      } finally {
+        await stopTyping()
+      }
+    },
+    { id: queuedMessageID(accountId, msg), text: (text ?? t("queueAttachment")).replaceAll(/\s+/g, " ").slice(0, 80) },
+  )
 }
