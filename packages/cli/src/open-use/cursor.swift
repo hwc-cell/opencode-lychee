@@ -417,8 +417,13 @@ private extension CursorController {
         guard AXIsProcessTrusted() else {
             throw OpenUseError("需要 macOS 辅助功能授权。请由用户手动授权 open-use doctor 显示的原生程序，然后重新连接；模型不得替用户修改系统权限。")
         }
-        guard let bound = selected, id == bound.id,
-              let fresh = windows(bound.id).first, fresh.pid == bound.pid else {
+        guard let bound = selected else {
+            throw OpenUseError("尚未绑定窗口。请先列出并选择用户指定的窗口。")
+        }
+        guard id == bound.id else {
+            throw OpenUseError("请求的窗口 ID 与当前绑定不一致。请通过 state 核对已绑定的窗口。")
+        }
+        guard let fresh = windows(bound.id).first, fresh.pid == bound.pid else {
             releaseWindow()
             throw OpenUseError("绑定窗口已失效。重新列出并明确选择窗口；不会回退到其他窗口。")
         }
