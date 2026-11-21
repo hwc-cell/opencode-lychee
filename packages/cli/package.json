@@ -35,7 +35,7 @@
     "@opencode/bridge": "workspace:*",
     "@opencode/client": "workspace:*",
     "@opencode/plugin": "workspace:*",
-    "@opencode/pty": "0.5.2",
+    "@opencode/pty": "0.6.0",
     "@opencode/schema": "workspace:*",
     "@opencode/server": "workspace:*",
     "@opencode/tui": "workspace:*",
