@@ -686,7 +686,8 @@ function App() {
   })
 
   const args = useArgs()
-  const startupPrompt = args.prompt ? { text: args.prompt, files: [], agents: [], pasted: [] } : undefined
+  const startupText = args.sessionID || args.continue ? args.takePrompt() : undefined
+  const startupPrompt = startupText ? { text: startupText, files: [], agents: [], pasted: [] } : undefined
   onMount(() => {
     batch(() => {
       if (args.agent) local.agent.set(args.agent)
@@ -1070,7 +1071,7 @@ function App() {
         run: () => {
           dialog.replace(() => (
             <DialogIntegration
-              onConnected={(providerID) => dialog.replace(() => <DialogModel providerID={providerID} />)}
+              onConnected={(integrationID) => dialog.replace(() => <DialogModel integrationID={integrationID} />)}
             />
           ))
         },

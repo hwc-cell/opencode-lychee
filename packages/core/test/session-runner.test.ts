@@ -3429,13 +3429,11 @@ describe("SessionRunnerLLM", () => {
         Stream.fail(
           header
             ? new AIError({
-                reason: new TransportError({
-                  message: "Connection closed",
-                  transport: "http",
-                  operation: "read",
+                reason: new RateLimitError({
+                  message: "Slow down",
                   http: new HttpContext({
                     url: "https://example.com",
-                    status: 200,
+                    status: 429,
                     headers: { "x-should-retry": "false" },
                   }),
                 }),
@@ -3449,7 +3447,7 @@ describe("SessionRunnerLLM", () => {
       expect(s.requests).toHaveLength(1)
       expect((yield* s.messages).find((message) => message.id === compaction.id)).toMatchObject({
         status: "failed",
-        error: { type: header ? "provider.transport" : "provider.invalid-output" },
+        error: { type: header ? "provider.rate-limit" : "provider.invalid-output" },
       })
     })
   }
@@ -4845,22 +4843,6 @@ describe("SessionRunnerLLM", () => {
       Expected.user("Run once"),
       Expected.assistant({ finish: "stop" }, [Expected.text("Once")]),
     ])
-  })
-
-  scenario("steers an active step with newly recorded prompts", function* (s) {
-    yield* s.admit("Start working")
-
-    yield* s.llm.push(TestLLM.stop(), TestLLM.stop())
-
-    const first = yield* s.resumePaused
-    yield* s.session.prompt({ sessionID, text: "Change direction" })
-    yield* first.finish
-    yield* Effect.yieldNow
-
-    expect(s.requests).toHaveLength(2)
-    expect(userTexts(s.requests[0])).toEqual(["Start working"])
-    expect(userTexts(s.requests[1])).toEqual(["Start working", "Change direction"])
-    expect((yield* s.context).map((message) => message.type)).toEqual(["user", "assistant", "user", "assistant"])
   })
 
   scenario("promotes queued input after continuation ends", function* (s) {

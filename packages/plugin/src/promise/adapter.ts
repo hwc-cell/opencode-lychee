@@ -316,8 +316,7 @@ export function fromPromise(plugin: Plugin) {
                 return yield* compiled.encode(result)
               }),
               { signal: options?.signal },
-              // An abort mid-call interrupts the fiber; reject with the signal's reason, as fetch does.
-            ).catch((error) => Promise.reject(options?.signal?.aborted ? options.signal.reason : error))
+            )
           }) as PromiseMethod
         }
 
@@ -369,7 +368,9 @@ export function fromPromise(plugin: Plugin) {
             activate: adaptApiMethod(CredentialEndpoints["credential.activate"], host.credential.activate),
           },
           event: {
-            subscribe: <Type extends Exclude<OpenCodeEvent["type"], "server.connected">>(
+            subscribe: <
+              Type extends Exclude<OpenCodeEvent["type"], "server.connected" | `experimental.space.${string}`>,
+            >(
               options?: SubscribeOptions<Type>,
             ) =>
               streams(
