@@ -21,6 +21,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./summary": "./src/summary.ts",
+    "./weixin/offers": "./src/weixin/offers.ts"
   }
 }

@@ -120,7 +120,7 @@ export type CursorInput =
   | { action: "displays" | "state" | "hide" | "windows" | "release_window" }
   | { action: "select_window"; windowID: number }
   | { action: "permissions" }
-  | { action: "observe_window"; windowID: number }
+  | { action: "observe_window"; windowID: number; query?: string }
   | { action: "click" | "type_text"; windowID: number; observationID: string; elementID: number; text?: string }
   | { action: "move_window"; windowID: number; x: number; y: number; seconds: number }
   | { action: "move"; displayID: string; x: number; y: number; seconds: number }

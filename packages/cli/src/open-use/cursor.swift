@@ -13,6 +13,7 @@ struct CursorCommand: Decodable {
     let observationID: String?
     let elementID: Int?
     let text: String?
+    let query: String?
 }
 
 struct DisplayInfo: Encodable {
@@ -454,7 +455,11 @@ private extension CursorController {
         return false
     }
 
-    func observe(_ id: UInt32?) throws -> WindowObservation {
+    func observe(_ id: UInt32?, query: String?) throws -> WindowObservation {
+        let term = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let term, term.isEmpty || term.utf16.count > 100 {
+            throw OpenUseError("请输入 1 到 100 个字符的控件名称。")
+        }
         let (bound, window) = try exactWindow(id)
         if readApproved != bound.id {
             try confirm("读取此窗口的控件结构和静态文字，并返回模型会话。输入框内容不读取，安全字段不展开。", window: bound)
@@ -466,12 +471,33 @@ private extension CursorController {
         let token = UUID().uuidString
         var rows: [ObservedControl] = []
         var truncated = false
+        let deadline = ContinuousClock.now + .seconds(5)
+        let maximumVisited = term == nil ? 160 : 600
+        var visited = 0
+        func exhausted() -> Bool {
+            visited >= maximumVisited || rows.count >= 160 || ContinuousClock.now >= deadline
+        }
         func visit(_ element: AXUIElement, parent: Int?, depth: Int) {
             // Deeply nested application controls still fit within belongs()'s 32-parent validation.
-            guard depth <= 24, rows.count < 160 else { truncated = true; return }
+            guard depth <= 24, !exhausted() else { truncated = true; return }
+            visited += 1
+            let secure = (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole
+            let observedLabel = label(element)
+            let matches = term.map { !secure && observedLabel.localizedCaseInsensitiveContains($0) } ?? true
+            if matches {
+                append(element, parent: term == nil ? parent : nil, label: observedLabel, secure: secure)
+            }
+            let childParent = term == nil ? rows.count - 1 : nil
+            if !secure, let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
+                for child in children {
+                    if exhausted() { truncated = true; break }
+                    visit(child, parent: childParent, depth: depth + 1)
+                }
+            }
+        }
+        func append(_ element: AXUIElement, parent: Int?, label observedLabel: String, secure: Bool) {
             let index = rows.count
             let role = attribute(element, kAXRoleAttribute) as? String ?? "unknown"
-            let secure = (attribute(element, kAXSubroleAttribute) as? String) == kAXSecureTextFieldSubrole
             let enabled = attribute(element, kAXEnabledAttribute) as? Bool
             var names: CFArray?
             AXUIElementCopyActionNames(element, &names)
@@ -480,7 +506,6 @@ private extension CursorController {
                 bounds = WindowBounds(x: point.x - bound.bounds.x, y: point.y - bound.bounds.y,
                                       width: dimensions.width, height: dimensions.height)
             } else { bounds = nil }
-            let observedLabel = label(element)
             controls[index] = (element, observedLabel, role)
             rows.append(ObservedControl(id: index, parent: parent, role: role, label: observedLabel,
                                         text: role == kAXStaticTextRole && !secure
@@ -488,9 +513,6 @@ private extension CursorController {
                                         actions: names as? [String] ?? [],
                                         enabled: enabled,
                                         editable: !secure && enabled != false && settable(element, kAXSelectedTextAttribute), bounds: bounds))
-            if !secure, let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
-                for child in children { visit(child, parent: index, depth: depth + 1) }
-            }
         }
         visit(window, parent: nil, depth: 0)
         observationID = token
@@ -528,7 +550,7 @@ private extension CursorController {
                 inputEnabled: allowInput, accessibility: AXIsProcessTrusted(), executable: CommandLine.arguments[0]))
         }
         if command.action == "observe_window" {
-            return CursorReply(id: command.id, ok: true, observation: try observe(command.windowID))
+            return CursorReply(id: command.id, ok: true, observation: try observe(command.windowID, query: command.query))
         }
         guard allowInput else { throw OpenUseError("真实输入默认关闭。必须由用户在本地使用 --allow-input 启动 MCP；模型不能通过工具参数开启。") }
         let (bound, window) = try exactWindow(command.windowID)

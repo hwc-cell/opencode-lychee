@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
-import { getUpdates, messageText, sendText, sendTyping, type WeixinMessage } from "./client"
+import { getUpdates, messageText, sendText, sendTyping, sendWeixinFile, type WeixinMessage } from "./client"
 import { keepTyping } from "../activity"
 import { sendChunked } from "../text"
 import { conversationKey, messageKey, promptID } from "./keys"
@@ -19,7 +19,9 @@ import {
   listSessions,
   switchSession,
 } from "./conversations"
-import { handleChatCommand } from "../commands"
+import { handleChatCommand, type ChatCommandControls, type ChatSessionEntry } from "../commands"
+import { consumeWeixinOffer, readOfferedFile } from "./offers"
+import { generateStageSummary, readStageSummary } from "../summary"
 import {
   deliverMessage,
   enqueue,
@@ -128,6 +130,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const pending = new Map<string, Promise<Session | undefined>>()
   const checked = new Set<string>()
   const generations = new Map<string, number>()
+  const numberedSessions = new Map<string, { directory: string; ids: string[] }>()
   const directoryFor = (key: string) => currentDirectory(readState(), key, opts.dir)
   const invalidate = (key: string) => {
     const stored = readState().sessions?.[key]
@@ -256,6 +259,9 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
   const schedule = (key: string, msg: WeixinMessage) => {
     if (inFlight.has(key) || completed.has(key)) return
     inFlight.add(key)
+    const chat = conversationKey(cred.accountId, msg)
+    const localSessions = () => listSessions(readState(), chat, opts.dir)
+    const listedDirectory = directoryFor(chat)
     const task = handleMessage({
       opts,
       client,
@@ -270,11 +276,66 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
       currentDirectory: () => directoryFor(conversationKey(cred.accountId, msg)),
       switchDirectory: (raw) => switchDirectory(conversationKey(cred.accountId, msg), raw),
       projects: () => listProjects(readState(), conversationKey(cred.accountId, msg), opts.dir),
-      sessions: () =>
-        listSessions(readState(), conversationKey(cred.accountId, msg), opts.dir).map((session) => ({
-          id: session.id,
-          active: session.current,
-        })),
+      sessions: async () => {
+        const entries = await Promise.all(
+          localSessions()
+            .slice(0, 12)
+            .map(async (row): Promise<ChatSessionEntry> => {
+              const info = await client.session
+                .get({ sessionID: row.id }, { signal: AbortSignal.timeout(3000) })
+                .catch(() => undefined)
+              if (!info) return { id: row.id, active: row.current, running: isSessionRunning(row.id) }
+              return {
+                id: row.id,
+                active: row.current,
+                title: info.title,
+                updated: info.time?.updated,
+                running: isSessionRunning(row.id) || (info.time?.busy ?? 0) > (info.time?.idle ?? 0),
+              }
+            }),
+        )
+        return entries.sort((a, b) => Number(b.active) - Number(a.active) || (b.updated ?? 0) - (a.updated ?? 0))
+      },
+      sessionNumbers: {
+        save: (ids) => {
+          if (directoryFor(chat) === listedDirectory) numberedSessions.set(chat, { directory: listedDirectory, ids })
+        },
+        get: (index) => {
+          const list = numberedSessions.get(chat)
+          return list?.directory === directoryFor(chat) ? list.ids[index] : undefined
+        },
+        has: (id) => localSessions().some((row) => row.id === id),
+      },
+      takeover: async (code) => {
+        if (isQueued(chat) || pending.has(chat)) return t("takeoverBusy")
+        const generation = generations.get(chat) ?? 0
+        const offer = consumeWeixinOffer("session", code, cred)
+        if (!offer) return t("offerInvalid")
+        const info = await client.session
+          .get({ sessionID: offer.id }, { signal: AbortSignal.timeout(5000) })
+          .catch(() => undefined)
+        if (!info || info.id !== offer.id || info.location.directory !== offer.directory || info.time.archived)
+          return t("takeoverUnavailable")
+        if ((generations.get(chat) ?? 0) !== generation || isQueued(chat) || pending.has(chat)) return t("takeoverBusy")
+        if (readState().credential?.token !== cred.token) return t("offerInvalid")
+        invalidate(chat)
+        numberedSessions.delete(chat)
+        updateState((next) => {
+          if (next.credential?.token !== cred.token) return
+          switchProject(next, chat, opts.dir, offer.directory)
+          rememberSession(next, chat, opts.dir, info.id)
+          if (info.model && !next.models?.[chat] && !next.model) {
+            next.models ??= {}
+            next.models[chat] = info.model
+          }
+        })
+        checked.add(info.id)
+        return t("takeoverReady", {
+          id: info.id,
+          title: info.title?.slice(0, 80) ?? info.id,
+          directory: info.location.directory,
+        })
+      },
       switchSession: async (id) => {
         const userKey = conversationKey(cred.accountId, msg)
         if (!listSessions(readState(), userKey, opts.dir).some((session) => session.id === id)) return false
@@ -428,13 +489,16 @@ async function handleMessage(args: {
   currentDirectory: () => string
   switchDirectory: (raw: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
   projects: () => Array<{ directory: string; active: boolean }>
-  sessions: () => Array<{ id: string; active: boolean }>
+  sessions: () => Promise<ChatSessionEntry[]>
+  sessionNumbers: NonNullable<ChatCommandControls["sessionNumbers"]>
   switchSession: (id: string) => Promise<boolean>
+  takeover: (code: string) => Promise<string>
 }) {
   const { opts, sdk, token, baseUrl, accountId, ownerUserId, msg, session } = args
   const userKey = conversationKey(accountId, msg)
   const state = readState()
   const text = messageText(msg)
+  const ownerPrivate = msg.from_user_id === ownerUserId && !msg.group_id
   const cancelWaiting = (id?: string) => {
     const waiting = queuedTasks(userKey)
       .filter((task) => !task.running && (!id || task.id === id))
@@ -507,6 +571,59 @@ async function handleMessage(args: {
     }))
   )
     return
+
+  const special = text?.trim().match(/^\/(takeover|file|summary)(?:\s+([\s\S]*))?$/i)
+  if (special) {
+    if (!ownerPrivate) {
+      await reply(t("offerOwnerOnly"))
+      return
+    }
+    const command = special[1].toLowerCase()
+    const value = special[2]?.trim() ?? ""
+    if (command === "takeover") {
+      await reply(value ? await args.takeover(value) : t("takeoverUsage")).catch(() => opts.log("接力回执发送失败"))
+      return
+    }
+    if (command === "file") {
+      if (!value) {
+        await reply(t("fileUsage"))
+        return
+      }
+      const offer = consumeWeixinOffer("file", value, { accountId, userId: ownerUserId })
+      if (!offer || readState().credential?.token !== token) {
+        await reply(t("offerInvalid"))
+        return
+      }
+      const bytes = await readOfferedFile(offer).catch(() => undefined)
+      if (!bytes || readState().credential?.token !== token) {
+        await reply(t("fileChanged")).catch(() => opts.log("微信附件错误通知发送失败"))
+        return
+      }
+      try {
+        await sendWeixinFile({ token, baseUrl, toUserId: ownerUserId, contextToken: ctxToken, name: offer.name, bytes })
+      } catch {
+        await reply(t("fileFailed")).catch(() => opts.log("微信附件错误通知发送失败"))
+      }
+      return
+    }
+    if (value !== "" && value.toLowerCase() !== "now") {
+      await reply(t("summaryUsage"))
+      return
+    }
+    const id = state.sessions?.[userKey]
+    if (!id) {
+      await reply(t("summaryNoSession"))
+      return
+    }
+    try {
+      const info = await args.client.session.get({ sessionID: id }, { signal: AbortSignal.timeout(5000) })
+      const result = value ? (await generateStageSummary(args.client, info)).body : await readStageSummary(info)
+      await reply(result || t("summaryMissing")).catch(() => opts.log("小结回复发送失败"))
+    } catch {
+      await reply(t("summaryFailed")).catch(() => opts.log("小结错误通知发送失败"))
+    }
+    return
+  }
 
   // 用户的模型选择(微信里 /model 切换并持久化), 默认 muse 免费模型
   state.models = state.models ?? {}
@@ -605,7 +722,8 @@ async function handleMessage(args: {
         directory: async (next) =>
           next ? args.switchDirectory(next) : { ok: true, directory: args.currentDirectory() },
         projects: async () => args.projects(),
-        sessions: async () => args.sessions(),
+        sessions: args.sessions,
+        sessionNumbers: args.sessionNumbers,
         switchSession: args.switchSession,
       },
     }))

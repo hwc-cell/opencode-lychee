@@ -77,7 +77,7 @@ OpenCode-Lychee weixin autostart   # macOS 后台常驻
 | `weixin autostart` / `autostop` | 安装或移除 macOS 常驻服务        |
 | `weixin logout`                 | 清除本地微信登录、会话和连接状态 |
 
-微信内支持 `/model`、`/new`、`/clear`、`/stop`、`/status`、`/where` 和 `/help`。新增 `/queue` 查看及单条取消排队消息，`/projects`、`/sessions` 切换本聊天项目与历史会话；扫码账号在私聊中用 `/answer` 回答 AI 追问。成功回复后会附任务回执，列出耗时、文件改动、检查与 Git 操作的已记录结果。详见[微信聊天指令](使用说明.md#wechat)。媒体只从受信任的微信 CDN 下载并在内存中解密；默认单附件 10MB、单消息合计 20MB。
+微信内支持项目切换、排队任务管理和任务回执。`/sessions` 显示当前项目的会话标题、最近更新与运行状态，发 `/sessions 2` 切换到上一份列表中的第 2 条。扫码账号在私聊中还能回答 AI 追问、接力电脑会话、查看阶段小结和领取电脑确认过的文件。详见[微信聊天指令](使用说明.md#wechat)。
 
 微信登录凭证保存在 `~/.local/state/opencode/weixin.json`。不要提交、截图或分享 API Key、登录凭证、加密密钥和状态文件。
 
@@ -93,6 +93,8 @@ OpenCode-Lychee weixin autostart   # macOS 后台常驻
 - `lychee-osmanthus-moon`
 
 输入 `/summary` 或 `/lycheexj` 开关荔枝小结。开启后退出 TUI 会生成中文 Markdown，小结保存在当前项目 `.opencode/reports/`。
+
+输入 `/summary-now` 立即生成一份阶段小结。微信私聊中的 `/summary` 可以查看对应会话的同一份阶段小结。
 
 输入 `/ledger-key` 设置荔枝记账 API Key，再用 `/autolychee` 开关会话成本同步。Key 只保存在本机 `~/.local/state/opencode/ledger.json`，不会写入项目。
 

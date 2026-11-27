@@ -75,6 +75,96 @@ export default Plugin.define({
             })
           },
         },
+        {
+          id: "lychee.summary.now",
+          title: "立即生成荔枝小结",
+          group: "Lychee",
+          slash: { name: "summary-now" },
+          palette: true,
+          async run() {
+            const route = context.ui.router.current()
+            if (route.type !== "session") {
+              context.ui.toast.show({ variant: "warning", message: "请先打开一个会话。" })
+              return
+            }
+            context.ui.dialog.clear()
+            context.ui.toast.show({ variant: "info", message: "正在生成阶段小结…" })
+            try {
+              const { generateStageSummary } = await import("@opencode/bridge/summary")
+              const session = await context.client.session.get({ sessionID: route.sessionID })
+              const result = await generateStageSummary(context.client, session)
+              context.ui.toast.show({ variant: "success", message: `阶段小结已保存：${result.report}` })
+            } catch (error) {
+              context.ui.toast.show({
+                variant: "error",
+                message: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        },
+        {
+          id: "lychee.weixin.handoff",
+          title: "在微信继续当前会话",
+          group: "Lychee",
+          slash: { name: "weixin-handoff" },
+          palette: true,
+          async run() {
+            const route = context.ui.router.current()
+            if (route.type !== "session") {
+              context.ui.toast.show({ variant: "warning", message: "请先打开一个会话。" })
+              return
+            }
+            try {
+              const { offerWeixinSession } = await import("@opencode/bridge/weixin/offers")
+              const session = await context.client.session.get({ sessionID: route.sessionID })
+              const code = offerWeixinSession({ id: session.id, directory: session.location.directory })
+              await context.ui.dialog.alert({
+                title: "微信会话接力",
+                message: `在扫码账号的微信私聊发送下面这条命令。接力码 5 分钟有效，仅使用一次。\n\n/takeover ${code}`,
+              })
+            } catch (error) {
+              context.ui.toast.show({
+                variant: "error",
+                message: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        },
+        {
+          id: "lychee.weixin.file",
+          title: "选择文件发回微信",
+          group: "Lychee",
+          slash: { name: "weixin-file" },
+          palette: true,
+          async run() {
+            const route = context.ui.router.current()
+            if (route.type !== "session") {
+              context.ui.toast.show({ variant: "warning", message: "请先打开一个会话。" })
+              return
+            }
+            const input = await context.ui.dialog.prompt({
+              title: "选择要发给微信的文件",
+              description: "输入绝对路径，或当前会话目录中的相对路径。最大 10 MB。",
+            })
+            if (!input?.trim()) return
+            try {
+              const session = await context.client.session.get({ sessionID: route.sessionID })
+              const filename = path.resolve(session.location.directory, input.trim())
+              if (!(await context.ui.dialog.confirm({ title: "确认文件", message: filename }))) return
+              const { offerWeixinFile } = await import("@opencode/bridge/weixin/offers")
+              const code = await offerWeixinFile(filename)
+              await context.ui.dialog.alert({
+                title: "微信附件领取",
+                message: `在扫码账号的微信私聊发送下面这条命令领取附件。领取码 5 分钟有效，仅使用一次。\n\n/file ${code}`,
+              })
+            } catch (error) {
+              context.ui.toast.show({
+                variant: "error",
+                message: error instanceof Error ? error.message : String(error),
+              })
+            }
+          },
+        },
       ],
     }))
 

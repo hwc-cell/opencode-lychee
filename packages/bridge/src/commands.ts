@@ -27,7 +27,12 @@ export const CHAT_COMMANDS = [
   "/queue",
   "/projects",
   "/sessions",
+  "/takeover",
+  "/summary",
+  "/file",
 ]
+
+export type ChatSessionEntry = { id: string; active: boolean; title?: string; updated?: number; running?: boolean }
 
 export type ChatCommandStatus = {
   directory: string
@@ -43,7 +48,12 @@ export type ChatCommandControls = {
   status: () => Promise<ChatCommandStatus>
   directory: (next?: string) => Promise<{ ok: boolean; directory: string; changed?: boolean; error?: string }>
   projects?: () => Promise<Array<{ directory: string; active: boolean }>>
-  sessions?: () => Promise<Array<{ id: string; active: boolean }>>
+  sessions?: () => Promise<ChatSessionEntry[]>
+  sessionNumbers?: {
+    save: (ids: string[]) => void
+    get: (index: number) => string | undefined
+    has: (id: string) => boolean
+  }
   switchSession?: (id: string) => Promise<boolean>
 }
 
@@ -131,22 +141,36 @@ export async function handleChatCommand(args: {
   if (command === "/sessions" || command.startsWith("/sessions ")) {
     if (!args.controls?.sessions || !args.controls.switchSession) return false
     const selected = text.slice("/sessions".length).trim()
-    const sessions = await args.controls.sessions()
     if (!selected) {
+      const sessions = await args.controls.sessions()
       await args.reply(
         sessions.length
           ? t("sessionList", {
-              sessions: sessions.map((session) => `${session.active ? "▶" : "·"} ${session.id}`).join("\n"),
+              sessions: sessions
+                .map((session, index) => {
+                  const title = session.title?.replace(/\s+/g, " ").trim().slice(0, 80)
+                  const time = session.updated ? new Date(session.updated).toLocaleString() : undefined
+                  const status =
+                    session.running === undefined ? undefined : t(session.running ? "cmdStatusRunning" : "sessionIdle")
+                  const details = [time, status].filter(Boolean).join(" · ")
+                  return `${session.active ? "▶" : "·"} ${index + 1}. ${title ? title + " · " : ""}${session.id}${details ? " · " + details : ""}`
+                })
+                .join("\n"),
             })
           : t("sessionListEmpty"),
       )
+      args.controls.sessionNumbers?.save(sessions.map((session) => session.id))
       return true
     }
-    if (!sessions.some((session) => session.id === selected)) {
+    const id = /^\d+$/.test(selected) ? args.controls.sessionNumbers?.get(Number(selected) - 1) : selected
+    if (
+      !id ||
+      !(args.controls.sessionNumbers?.has(id) ?? (await args.controls.sessions()).some((session) => session.id === id))
+    ) {
       await args.reply(t("sessionUnknown"))
       return true
     }
-    await args.reply(t((await args.controls.switchSession(selected)) ? "sessionSwitched" : "sessionSwitchFailed"))
+    await args.reply(t((await args.controls.switchSession(id)) ? "sessionSwitched" : "sessionSwitchFailed"))
     return true
   }
 

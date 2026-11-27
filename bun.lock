@@ -810,6 +810,7 @@
       "name": "@opencode/tui",
       "version": "2.4.1",
       "dependencies": {
+        "@opencode/bridge": "workspace:*",
         "@opencode/client": "workspace:*",
         "@opencode/core": "workspace:*",
         "@opencode/latex": "workspace:*",

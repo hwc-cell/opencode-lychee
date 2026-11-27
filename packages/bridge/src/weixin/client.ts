@@ -1,5 +1,5 @@
 // 微信 iLink Bot API 客户端
-import { randomBytes } from "node:crypto"
+import { createCipheriv, createHash, randomBytes } from "node:crypto"
 export { chunkText } from "../text"
 
 const DEFAULT_BASE = "https://ilinkai.weixin.qq.com"
@@ -240,14 +240,20 @@ export async function getUpdates(opts: {
   }
 }
 
-export async function sendText(opts: {
+type SendTarget = {
   token: string
   baseUrl: string
   toUserId: string
   contextToken: string
-  text: string
   clientId?: string
-}): Promise<void> {
+}
+type WeixinRequest = (url: string | URL, request: RequestInit) => Promise<Response>
+
+export async function sendText(opts: SendTarget & { text: string }): Promise<void> {
+  await sendItem(opts, { type: 1, text_item: { text: opts.text } })
+}
+
+async function sendItem(opts: SendTarget, item: WeixinMessageItem, request: WeixinRequest = fetch) {
   const clientId = opts.clientId ?? `lychee-weixin:${Date.now()}-${randomBytes(4).toString("hex")}`
   const msg = {
     from_user_id: "",
@@ -256,9 +262,9 @@ export async function sendText(opts: {
     message_type: 2,
     message_state: 2,
     context_token: opts.contextToken,
-    item_list: [{ type: 1, text_item: { text: opts.text } }],
+    item_list: [item],
   }
-  const res = await fetch(`${opts.baseUrl}/ilink/bot/sendmessage`, {
+  const res = await request(`${opts.baseUrl}/ilink/bot/sendmessage`, {
     method: "POST",
     headers: baseHeaders(opts.token),
     body: JSON.stringify({ msg, base_info: baseInfo() }),
@@ -267,13 +273,90 @@ export async function sendText(opts: {
   if (!res.ok) throw new Error(`发送失败: HTTP ${res.status}`)
   const body = await res.text()
   if (!body) return
-  let json: { ret?: number }
+  let json: { ret?: number; errcode?: number }
   try {
-    json = JSON.parse(body) as { ret?: number }
+    json = JSON.parse(body) as typeof json
   } catch {
     throw new Error("发送失败: 服务端返回了无效响应")
   }
-  if (json.ret !== undefined && json.ret !== 0) throw new Error(`发送失败: ret=${json.ret}`)
+  const ret = json.ret || json.errcode || 0
+  if (ret !== 0) throw new Error(`发送失败: ret=${ret}`)
+}
+
+// Tencent iLink protocol: request an upload slot, POST encrypted bytes, then send
+// the download parameter and key as a generic file item.
+export async function sendWeixinFile(
+  opts: SendTarget & { name: string; bytes: Uint8Array },
+  request: WeixinRequest = fetch,
+) {
+  const key = randomBytes(16)
+  const filekey = randomBytes(16).toString("hex")
+  const cipher = createCipheriv("aes-128-ecb", key, null)
+  const encrypted = Buffer.concat([cipher.update(opts.bytes), cipher.final()])
+  const slot = await request(`${opts.baseUrl}/ilink/bot/getuploadurl`, {
+    method: "POST",
+    headers: baseHeaders(opts.token),
+    redirect: "error",
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    body: JSON.stringify({
+      filekey,
+      media_type: 3,
+      to_user_id: opts.toUserId,
+      rawsize: opts.bytes.length,
+      rawfilemd5: createHash("md5").update(opts.bytes).digest("hex"),
+      filesize: encrypted.length,
+      no_need_thumb: true,
+      aeskey: key.toString("hex"),
+      base_info: baseInfo(),
+    }),
+  })
+  if (!slot.ok) throw new Error(`附件上传准备失败: HTTP ${slot.status}`)
+  const data = (await slot.json()) as {
+    ret?: number
+    errcode?: number
+    upload_param?: string
+    upload_full_url?: string
+  }
+  if (data.ret || data.errcode || (!data.upload_full_url && !data.upload_param))
+    throw new Error("微信未返回可用的上传地址。")
+  const url = new URL(data.upload_full_url ?? "https://novac2c.cdn.weixin.qq.com/c2c/upload")
+  if (!data.upload_full_url) {
+    url.searchParams.set("encrypted_query_param", data.upload_param!)
+    url.searchParams.set("filekey", filekey)
+  }
+  if (
+    url.protocol !== "https:" ||
+    !url.hostname.endsWith(".cdn.weixin.qq.com") ||
+    url.username ||
+    url.password ||
+    url.port
+  )
+    throw new Error("微信附件上传地址不可用。")
+  const uploaded = await request(url, {
+    method: "POST",
+    body: encrypted,
+    headers: { "Content-Type": "application/octet-stream" },
+    redirect: "error",
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+  })
+  const param = uploaded.headers.get("x-encrypted-param")
+  if (uploaded.status !== 200 || !param) throw new Error(`附件上传未完成: HTTP ${uploaded.status}`)
+  await sendItem(
+    opts,
+    {
+      type: 4,
+      file_item: {
+        media: {
+          encrypt_query_param: param,
+          aes_key: Buffer.from(key.toString("hex")).toString("base64"),
+          encrypt_type: 1,
+        },
+        file_name: opts.name,
+        len: String(opts.bytes.length),
+      },
+    },
+    request,
+  )
 }
 
 export async function sendTyping(opts: {

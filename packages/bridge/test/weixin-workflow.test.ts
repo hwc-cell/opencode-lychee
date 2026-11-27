@@ -31,6 +31,8 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
   let cursor = 0
   let sequence = 0
   let questionPending = false
+  let uploadSlots = 0
+  let summaries = 0
   let exitCode: number | undefined
   let errors = ""
   const wake = () => {
@@ -90,7 +92,29 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
       }
       if (url.pathname.endsWith("/getconfig")) return Response.json({ typing_ticket: "fixture" })
       if (url.pathname.endsWith("/sendtyping")) return Response.json({ ret: 0 })
+      if (url.pathname.endsWith("/getuploadurl")) {
+        uploadSlots++
+        return Response.json({ upload_full_url: "https://invalid.example/upload" })
+      }
+      if (url.pathname.endsWith("/generate/text")) {
+        const body = (await request.json()) as { prompt: string }
+        if (!body.prompt.includes("电脑版会话上下文"))
+          return Response.json({ error: "Missing source transcript" }, { status: 400 })
+        summaries++
+        return Response.json({ data: { text: "## 已完成\n生成测试阶段小结" } })
+      }
       const sessionID = url.pathname.match(/\/session\/([^/]+)/)?.[1]
+      if (request.method === "GET" && url.pathname === `/api/session/${sessionID}`) {
+        const directory = sessionID === "ses_desktop" ? second : first
+        return Response.json({
+          data: {
+            id: sessionID,
+            title: sessionID === "ses_desktop" ? "电脑版测试会话" : "微信原会话",
+            location: { directory },
+            time: { updated: Date.UTC(2026, 10, 27) },
+          },
+        })
+      }
       if (url.pathname.endsWith("/permission")) return Response.json({ data: [] })
       if (url.pathname.endsWith("/form"))
         return Response.json({ data: questionPending && sessionID === "ses_owner" ? [form] : [] })
@@ -134,15 +158,18 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
                       },
                     ]
                   : []),
-                { id: prompt.id, type: "user" },
+                { id: prompt.id, type: "user", text: prompt.text },
               ]
-            : [],
+            : sessionID === "ses_desktop"
+              ? [{ id: "msg_desktop", type: "user", text: "电脑版会话上下文" }]
+              : [],
           cursor: {},
         })
       }
       return new Response(`Unexpected fixture request: ${request.method} ${url.pathname}`, { status: 500 })
     },
   })
+  await writeFile(path.join(second, "report.md"), "用户在电脑确认的文件")
   await writeFile(
     stateFile,
     JSON.stringify({
@@ -178,6 +205,7 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
       OPENCODE_LANG: "zh",
       LYCHEE_FIXTURE_SERVER: server.url.origin,
       LYCHEE_FIXTURE_DIRECTORY: first,
+      LYCHEE_FIXTURE_ARTIFACTS: second,
       LYCHEE_MODEL_TIMEOUT_MS: "15000",
     },
   })
@@ -194,20 +222,31 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
     new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         listeners.delete(check)
-        reject(new Error(`Timed out: ${label}; requests=${requests.slice(-15).join(",")}; stderr=${errors}`))
+        clearInterval(poll)
+        reject(
+          new Error(
+            `Timed out: ${label}; requests=${requests.slice(-15).join(",")}; replies=${outgoing
+              .slice(-5)
+              .map((item) => item.text)
+              .join(" | ")}; stderr=${errors}`,
+          ),
+        )
       }, 5000)
       const check = () => {
         if (exitCode !== undefined) {
           clearTimeout(timer)
+          clearInterval(poll)
           listeners.delete(check)
           reject(new Error(`Bridge exited ${exitCode}: ${errors}`))
           return
         }
         if (!predicate()) return
         clearTimeout(timer)
+        clearInterval(poll)
         listeners.delete(check)
         resolve()
       }
+      const poll = setInterval(check, 25)
       listeners.add(check)
       check()
     })
@@ -276,12 +315,48 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
     await until(() => prompts.some((prompt) => prompt.text === "保留乙2"), "other chat's queue is preserved")
     expect(prompts.some((prompt) => prompt.text === "不要执行甲2")).toBe(false)
 
-    inject("需要追问")
+    const ownerTask = inject("需要追问")
     await until(() => reply("owner", "frm_workflow"), "question notification through polling")
     inject("/answer frm_workflow 2")
     await until(() => answered.length === 1, "question submitted through chat")
     expect(answered).toEqual([{ answer: { q0: "B" } }])
     await until(() => reply("owner", "答案已提交") && reply("owner", "任务回执"), "question continuation and receipt")
+    await until(() => !state().inbox?.[messageKey(account, ownerTask)], "owner task finishes before switching sessions")
+
+    const codes = JSON.parse(readFileSync(path.join(second, "offer-codes.json"), "utf8")) as {
+      code: string
+      file: string
+    }
+    inject(`/takeover ${codes.code}`, "group-a")
+    await until(() => reply("group-a", "仅限扫码账号私聊"), "group cannot redeem a session")
+    inject(`/takeover ${codes.code}`)
+    await until(() => reply("owner", "已接入「电脑版测试会话」"), "owner connects desktop session")
+    expect(state().sessions?.[keyOwner]).toBe("ses_desktop")
+    expect(state().conversations?.[keyOwner]?.directory).toBe(second)
+    inject(`/takeover ${codes.code}`)
+    await until(() => reply("owner", "已过期或已使用"), "session code is single-use")
+    inject("/sessions")
+    await until(() => reply("owner", "1. 电脑版测试会话 · ses_desktop"), "session list includes title and number")
+    const selected = inject("/sessions 1")
+    await until(
+      () => !state().inbox?.[messageKey(account, selected)] && reply("owner", "已切换会话"),
+      "owner selects displayed number",
+    )
+    inject("/summary now")
+    await until(() => reply("owner", "生成测试阶段小结"), "summary generated from desktop transcript")
+    const report = path.join(second, ".opencode", "reports", "ses_desktop-stage.md")
+    expect(readFileSync(report, "utf8")).toContain("生成测试阶段小结")
+    const summariesBefore = outgoing.filter((message) => message.text.includes("生成测试阶段小结")).length
+    inject("/summary")
+    await until(
+      () => outgoing.filter((message) => message.text.includes("生成测试阶段小结")).length > summariesBefore,
+      "summary read from disk",
+    )
+    expect(summaries).toBe(1)
+    await writeFile(path.join(second, "report.md"), "文件在确认之后被改动")
+    inject(`/file ${codes.file}`)
+    await until(() => reply("owner", "选定的文件已变更"), "changed attachment not sent")
+    expect(uploadSlots).toBe(0)
   } finally {
     for (const sessionID of waiting.keys()) complete(sessionID)
     pendingPoll?.(updateResponse([]))

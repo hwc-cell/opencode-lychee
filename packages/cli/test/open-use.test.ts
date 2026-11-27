@@ -94,6 +94,13 @@ test("Open Use teaches exact-window input boundaries and rejects unapproved or i
     expect(await client.callTool({ name: "window_cursor", arguments: { windowID: 1, x: -1, y: 0 } })).toMatchObject({
       isError: true,
     })
+    const observe = tools.tools.find((tool) => tool.name === "observe_window")
+    expect(observe?.inputSchema).toMatchObject({
+      properties: { query: { type: "string", minLength: 1, maxLength: 100 } },
+    })
+    expect(await client.callTool({ name: "observe_window", arguments: { windowID: 1, query: "" } })).toMatchObject({
+      isError: true,
+    })
     for (const name of ["click", "type_text"]) {
       const denied = await client.callTool({
         name,

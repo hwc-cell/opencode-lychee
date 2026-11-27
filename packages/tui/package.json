@@ -49,6 +49,7 @@
     }
   },
   "dependencies": {
+    "@opencode/bridge": "workspace:*",
     "@opencode/client": "workspace:*",
     "@opencode/core": "workspace:*",
     "@opencode/latex": "workspace:*",
