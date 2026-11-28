@@ -30,7 +30,10 @@ export type WeixinState = {
   // 每个聊天独立保存项目目录与已建立的会话；sessions 保留为当前会话兼容映射。
   conversations?: Record<
     string,
-    { directory: string; projects: Record<string, { sessionID?: string; sessions: string[] }> }
+    {
+      directory: string
+      projects: Record<string, { sessionID?: string; sessions: string[]; handoffs?: string[] }>
+    }
   >
   // (accountId#userId) -> 用户选择的模型(微信 /model 切换)
   models?: Record<string, { id: string; providerID: string; variant?: string }>

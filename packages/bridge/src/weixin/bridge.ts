@@ -13,6 +13,7 @@ import { readState, updateState } from "./state"
 import {
   currentDirectory,
   rememberSession,
+  isHandoffSession,
   clearCurrentSession,
   switchProject,
   listProjects,
@@ -323,11 +324,7 @@ export async function runWeixinBridge(opts: BridgeOptions): Promise<void> {
         updateState((next) => {
           if (next.credential?.token !== cred.token) return
           switchProject(next, chat, opts.dir, offer.directory)
-          rememberSession(next, chat, opts.dir, info.id)
-          if (info.model && !next.models?.[chat] && !next.model) {
-            next.models ??= {}
-            next.models[chat] = info.model
-          }
+          rememberSession(next, chat, opts.dir, info.id, true)
         })
         checked.add(info.id)
         return t("takeoverReady", {
@@ -712,9 +709,18 @@ async function handleMessage(args: {
         status: async () => {
           const current = readState()
           const sessionID = current.sessions?.[userKey]
+          const adopted = isHandoffSession(current, userKey, opts.dir, sessionID)
+          const model =
+            adopted && sessionID
+              ? (
+                  await args.client.session
+                    .get({ sessionID }, { signal: AbortSignal.timeout(3000) })
+                    .catch(() => undefined)
+                )?.model
+              : (current.models?.[userKey] ?? current.model)
           return {
             directory: args.currentDirectory(),
-            model: current.models?.[userKey] ?? current.model,
+            model,
             sessionID,
             running: sessionID ? isSessionRunning(sessionID) : false,
           }
@@ -732,7 +738,11 @@ async function handleMessage(args: {
   }
 
   // 未配置模型的用户: 引导配置(指令如 /model 已在上方放行)
-  if (!state.models[userKey] && !state.model) {
+  if (
+    !state.models[userKey] &&
+    !state.model &&
+    !isHandoffSession(state, userKey, opts.dir, state.sessions?.[userKey])
+  ) {
     await reply(t("needModelConfig"))
     return
   }
@@ -793,7 +803,7 @@ async function handleMessage(args: {
           text: prompt.text,
           files: prompt.files,
           promptID: promptID(accountId, msg),
-          model,
+          model: isHandoffSession(readState(), userKey, opts.dir, sessionID) ? undefined : model,
           cancelled,
           poll:
             msg.from_user_id === ownerUserId && !msg.group_id

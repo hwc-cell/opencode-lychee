@@ -4,12 +4,19 @@ export function currentDirectory(state: WeixinState, key: string, defaultDir: st
   return state.conversations?.[key]?.directory ?? state.workDir ?? defaultDir
 }
 
-export function rememberSession(state: WeixinState, key: string, defaultDir: string, id: string) {
+export function rememberSession(state: WeixinState, key: string, defaultDir: string, id: string, handoff = false) {
   const conversation = snapshot(state, key, defaultDir)
   const project = conversation.projects[conversation.directory]
   project.sessionID = id
   project.sessions = [id, ...project.sessions.filter((session) => session !== id)]
+  if (handoff) project.handoffs = [...new Set([...(project.handoffs ?? []), id])]
   save(state, key, conversation)
+}
+
+export function isHandoffSession(state: WeixinState, key: string, defaultDir: string, id: string | undefined) {
+  if (!id) return false
+  const directory = currentDirectory(state, key, defaultDir)
+  return state.conversations?.[key]?.projects[directory]?.handoffs?.includes(id) ?? false
 }
 
 export function clearCurrentSession(state: WeixinState, key: string, defaultDir: string) {
@@ -63,6 +70,7 @@ function snapshot(state: WeixinState, key: string, defaultDir: string) {
   const project = projects[directory]
   const sessionID = state.sessions?.[key] ?? project?.sessionID
   projects[directory] = {
+    ...project,
     ...(sessionID ? { sessionID } : {}),
     sessions: [...new Set([...(sessionID ? [sessionID] : []), ...(project?.sessions ?? [])])],
   }

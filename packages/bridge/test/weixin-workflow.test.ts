@@ -21,6 +21,7 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
   const keyOwner = `${account}#owner`
   const outgoing: Array<{ context: string; text: string }> = []
   const prompts: Array<{ sessionID: string; id: string; text: string }> = []
+  const modelSwitches: string[] = []
   const requests: string[] = []
   const answered: unknown[] = []
   const updates: WeixinMessage[][] = []
@@ -110,6 +111,7 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
           data: {
             id: sessionID,
             title: sessionID === "ses_desktop" ? "电脑版测试会话" : "微信原会话",
+            model: { id: "desktop-model", providerID: "fixture" },
             location: { directory },
             time: { updated: Date.UTC(2026, 10, 27) },
           },
@@ -126,7 +128,10 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
         complete("ses_owner")
         return new Response(null, { status: 204 })
       }
-      if (url.pathname.endsWith("/model")) return new Response(null, { status: 204 })
+      if (url.pathname.endsWith("/model")) {
+        modelSwitches.push(sessionID!)
+        return new Response(null, { status: 204 })
+      }
       if (url.pathname.endsWith("/prompt")) {
         const body = (await request.json()) as { id: string; text: string }
         prompts.push({ sessionID: sessionID!, ...body })
@@ -357,6 +362,14 @@ test("real bridge keeps chats isolated and delivers questions, queue cancellatio
     inject(`/file ${codes.file}`)
     await until(() => reply("owner", "选定的文件已变更"), "changed attachment not sent")
     expect(uploadSlots).toBe(0)
+
+    inject("在手机上继续")
+    await until(
+      () => prompts.some((prompt) => prompt.sessionID === "ses_desktop" && prompt.text === "在手机上继续"),
+      "prompt reaches the same desktop session",
+    )
+    expect(modelSwitches).not.toContain("ses_desktop")
+    complete("ses_desktop")
   } finally {
     for (const sessionID of waiting.keys()) complete(sessionID)
     pendingPoll?.(updateResponse([]))
