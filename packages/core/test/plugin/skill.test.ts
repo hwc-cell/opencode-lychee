@@ -54,6 +54,15 @@ describe("SkillPlugin.Plugin", () => {
       )
       expect(report?.content).toContain("- opencode version: 1.2.3")
       expect(report?.content).toContain("- install/channel: beta")
+      expect(skills).toContainEqual(
+        expect.objectContaining({
+          id: "lychee-ledger",
+          path: "skill://lychee-ledger/SKILL.md",
+          description: expect.stringContaining("荔枝记账"),
+        }),
+      )
+      const ledger = yield* skill.read(Skill.ID.make("lychee-ledger"), Skill.manifest)
+      expect(new TextDecoder().decode(ledger)).toContain("opencode ledger add")
     }),
   )
 

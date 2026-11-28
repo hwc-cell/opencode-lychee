@@ -382,6 +382,30 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         Spec.make("logout", { description: "Sign out and clear local WeChat bridge state" }),
       ],
     }),
+    Spec.make("ledger", {
+      description: "Query or update personal Lychee Ledger records using the locally configured API key",
+      params: {
+        action: Argument.Literals("action", ["list", "add", "delete"]),
+        amount: Flag.String("amount").pipe(
+          Flag.withDescription("Signed amount for add (e.g. --amount=-35.50)"),
+          Flag.optional,
+        ),
+        category: Flag.String("category").pipe(Flag.withDescription("Category for add"), Flag.optional),
+        date: Flag.String("date").pipe(
+          Flag.withDescription("Record date, YYYY-MM-DD (add defaults to today)"),
+          Flag.optional,
+        ),
+        note: Flag.String("note").pipe(Flag.withDescription("Optional note for add"), Flag.optional),
+        from: Flag.String("from").pipe(Flag.withDescription("Inclusive start date for list"), Flag.optional),
+        to: Flag.String("to").pipe(Flag.withDescription("Inclusive end date for list"), Flag.optional),
+        id: Flag.String("id").pipe(Flag.withDescription("Record client ID for list or delete"), Flag.optional),
+        limit: Flag.Int("limit").pipe(
+          Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+          Flag.withDescription("Maximum list rows to print (1–100)"),
+          Flag.withDefault(20),
+        ),
+      },
+    }),
     Spec.make("open-use", {
       description: "Open Use: macOS window-bound accessibility tools and circular model cursor",
       params: {

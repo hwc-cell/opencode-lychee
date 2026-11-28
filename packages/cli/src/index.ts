@@ -95,6 +95,7 @@ const Handlers = Runtime.handlers(Commands, {
     logout: () => import("./commands/handlers/weixin/logout"),
   },
   "open-use": () => import("./commands/handlers/open-use"),
+  ledger: () => import("./commands/handlers/ledger"),
   voice: () => import("./commands/handlers/voice"),
   stats: () => import("./commands/handlers/stats"),
   mini: () => import("./commands/handlers/mini"),

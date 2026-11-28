@@ -9,11 +9,13 @@ import { AbsolutePath } from "../schema.js"
 import { Skill } from "../skill.js"
 import { Config } from "../config.js"
 import { Flag } from "../flag.js"
+import { SkillFile } from "../config/plugin/skill-file.js"
 import { Global } from "@opencode/util/global"
 import os from "os"
 import opencodeContent from "./skill/opencode.md" with { type: "text" }
 import reportContent from "./skill/report.md" with { type: "text" }
 import apiContent from "./skill/opencode-api.md" with { type: "text" }
+import ledgerContent from "./skill/lychee-ledger/SKILL.md" with { type: "text" }
 import { files } from "./skill/opencode/api.js"
 
 export const OpencodeContent = opencodeContent
@@ -39,7 +41,9 @@ export const Plugin = define({
           description: OpencodeDescription,
           path: AbsolutePath.make("skill://opencode/SKILL.md"),
           // With opencode:// fetch, its API section points there instead of the `opencode api` command.
-          content: api ? OpencodeContent.replace(/## \[API\][^]*?(?=## \[Client\])/, `${apiContent}\n`) : OpencodeContent,
+          content: api
+            ? OpencodeContent.replace(/## \[API\][^]*?(?=## \[Client\])/, `${apiContent}\n`)
+            : OpencodeContent,
         }),
         api ? files : undefined,
       )
@@ -52,6 +56,15 @@ export const Plugin = define({
           content: reportContent,
         }),
       )
+      const ledger = SkillFile.parse("skill", "skill/lychee-ledger/SKILL.md", ledgerContent)
+      if (ledger._tag === "Parsed") {
+        editor.add(
+          Skill.Info.make({
+            ...ledger.skill,
+            path: AbsolutePath.make(Skill.uri(ledger.skill.id, Skill.manifest)),
+          }),
+        )
+      }
     })
   }),
 })

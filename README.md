@@ -98,6 +98,8 @@ OpenCode-Lychee weixin autostart   # macOS 后台常驻
 
 输入 `/ledger-key` 设置荔枝记账 API Key，再用 `/autolychee` 开关会话成本同步。Key 只保存在本机 `~/.local/state/opencode/ledger.json`，不会写入项目。
 
+内置 `lychee-ledger` 技能可查询个人账单、记收入或支出、软删除指定记录。它复用 `/ledger-key` 的本机配置。终端也可直接运行 `OpenCode-Lychee ledger --help`。
+
 ## macOS 语音输入
 
 ```bash
